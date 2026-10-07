@@ -46,12 +46,12 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.1</div>
+  <div id="versie">versie 0.2</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.1';
+const VERSIE = '0.2';
 
 // ---------- Instellingen ----------
 const D = {
@@ -60,9 +60,9 @@ const D = {
   vMax: 5.5,             // maximale snelheid (m/s)
   remTijd: 3.0,          // snelheid halveert ongeveer in deze tijd
   stapZij: 0.20, stapTijd: 0.15,
-  knie: 0.08, knieTijd: 0.4,
+  knie: 0.10, knieTijd: 0.25,   // bukken t.o.v. je schaatshouding, opgeteld terwijl de brug over je heen gaat
   rugTijd: 1.5,
-  zitten: 0.30,
+  zitten: 0.42,          // hoofd zo veel lager dan bij het opstellen (1 s) = zitten = pauze
   opstelTijd: 3.0, opstelMarge: 0.015
 };
 // opdrachten tijdens de rit (tijd in seconden na de start van de rit)
@@ -291,7 +291,7 @@ let fase = 'opstellen', faseT = 0, stap = 0, ritT = 0, pauzeVan = null;
 let base = null, anker = null, stilT = 0;
 let v = 0, afstand = 0, kant = 0, slagen = 0, laatsteSlag = -9, slagenUitleg = 0;
 let opdrIndex = 0, opdr = null, resultaten = [], log = [], gebeurtenissen = [], zitT = 0, staT = 0;
-let aanmoedigT = 0, langzaamT = 0;
+let aanmoedigT = 0, langzaamT = 0, ritBasisY = 1.6, ritten = [];
 function gebeurtenis(type, extra = {}) { gebeurtenissen.push({ t: +tijd.toFixed(2), type, ...extra }); }
 
 function zetBase(p, q) {
@@ -327,11 +327,16 @@ function update(p, q, frame, ref, dt) {
   let nieuweSlag = false;
   if (base && (lat > D.slag && kant !== 1 || lat < -D.slag && kant !== -1)) { kant = lat > 0 ? 1 : -1; nieuweSlag = true; laatsteSlag = tijd; }
 
-  // veiligheid: zitten = pauze
-  if (base && fase !== 'pauze' && fase !== 'opstellen' && fase !== 'einde') {
+  // veiligheid: zitten = pauze (niet tijdens het bukken onder een brug)
+  const onderBrug = opdr && opdr.id === 'brug' && !opdr.klaar;
+  if (base && fase !== 'pauze' && fase !== 'opstellen' && fase !== 'einde' && !onderBrug) {
     zitT = daal > D.zitten ? zitT + dt : 0;
-    if (zitT > 0.5) { pauzeVan = fase; fase = 'pauze'; staT = 0; zetWolk('Even rust. Sta op als je verder wilt.', '#43BFFD'); gebeurtenis('pauze'); }
+    if (zitT > 1.0) { pauzeVan = fase; fase = 'pauze'; staT = 0; zetWolk('Even rust. Sta op als je verder wilt.', '#43BFFD'); gebeurtenis('pauze'); }
   }
+  // hoofdhoogte tijdens het schaatsen (je zakt vanzelf wat door je knieën): langzaam meelopende basis
+  const rustig = !opdr || (ritT - opdr.start) < NADER - 2;
+  if (fase === 'rit' && rustig) ritBasisY += (p.y - ritBasisY) * Math.min(1, dt / 3);
+  const daalRel = ritBasisY - p.y;
 
   let doelPose = { lean: 0, buk: 0, rug: 0, juich: 0, zij: 0 };
   const actief = tijd - laatsteSlag < 2;
@@ -353,7 +358,7 @@ function update(p, q, frame, ref, dt) {
         if (slagenUitleg >= 4) { stap = 2; faseT = 0; geluid.goed(); }
       } else {
         zetWolk('Top! Zo schaatsen we. Daar gaan we!'); doelPose.juich = 1;
-        if (faseT > 3) { fase = 'rit'; faseT = 0; ritT = 0; opdrIndex = 0; afstand = 0; gebeurtenis('rit-start'); }
+        if (faseT > 3) { fase = 'rit'; faseT = 0; ritT = 0; opdrIndex = 0; afstand = 0; resultaten = []; slagen = 0; ritBasisY = p.y; gebeurtenis('rit-start'); }
       }
       break;
     }
@@ -368,27 +373,36 @@ function update(p, q, frame, ref, dt) {
       }
       if (opdr) {
         const ot = ritT - opdr.start;
-        if (opdr.id !== 'wind') object.position.z = -14 + Math.min(ot, NADER + 2) * (14 / NADER);
-        // het maatje doet de beweging voor
+        const zObj = -14 + Math.min(ot, NADER + 2) * (14 / NADER);   // 0 = bij jou, maatje staat op -2,6
+        if (opdr.id !== 'wind') object.position.z = zObj;
+        // het maatje doet het voor op het moment dat het object bij hém is
+        if (opdr.id === 'wak') doelPose.zij = (zObj > -4.2 && zObj < -1.2) ? -0.35 : 0;
+        if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
+        if (opdr.id === 'wind' && !opdr.klaar) doelPose.rug = 1;
+        const gelukt = () => { opdr.klaar = true; opdr.gelukt = true; opdr.klaarT = ot; geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +(opdr.reactie ?? ot).toFixed(2) }); };
+        const mislukt = () => { opdr.klaar = true; opdr.klaarT = ot; geluid.mis(); zetWolk(opdr.mis); gebeurtenis('mislukt', { id: opdr.id }); };
         if (!opdr.klaar) {
-          if (opdr.id === 'wak') doelPose.zij = -0.35;
-          if (opdr.id === 'brug') doelPose.buk = ot > 1 ? 1 : 0;
-          if (opdr.id === 'wind') doelPose.rug = 1;
-        }
-        // herkenning: venster vanaf 1,5 s tot vlak nadat het object voorbij is
-        if (!opdr.klaar && ot > 1.5) {
-          if (opdr.id === 'wak') opdr.hold = -lat > D.stapZij ? opdr.hold + dt : 0;
-          if (opdr.id === 'brug') opdr.hold = daal > D.knie ? opdr.hold + dt : 0;
-          if (opdr.id === 'wind') opdr.hold = (handen === 0 && daal < D.knie) ? opdr.hold + dt : 0;
-          const nodig = { wak: D.stapTijd, brug: D.knieTijd, wind: D.rugTijd }[opdr.id];
-          if (opdr.hold >= nodig) { opdr.klaar = true; opdr.gelukt = true; opdr.reactie = ot; geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +ot.toFixed(2) }); }
-          else if (ot > NADER + 1.5) { opdr.klaar = true; geluid.mis(); zetWolk(opdr.mis); gebeurtenis('mislukt', { id: opdr.id }); }
+          if (opdr.id === 'wind') {
+            if (ot > 1.5) {
+              opdr.hold = handen === 0 ? opdr.hold + dt : 0;
+              if (opdr.hold > 0) { if (opdr.reactie === undefined) opdr.reactie = ot; zetWolk('Goed zo, even vasthouden…', '#43BFFD'); }
+              else if (ot > 4) zetWolk(handen > 1 ? 'Ik zie je handen nog!' : 'Ik zie nog een hand!', '#EB69BB');
+              if (opdr.hold >= D.rugTijd) gelukt(); else if (ot > NADER + 3) mislukt();
+            }
+          } else {
+            if (zObj > -2.5 && !opdr.nu) { opdr.nu = true; zetWolk(opdr.id === 'wak' ? 'Nu opzij!' : 'Nu bukken!', '#EB69BB'); toon(990, 0.1); }
+            if (zObj > -1.5 && zObj < 0.6) {   // het object is vlak bij je: nu moet het gebeuren
+              const ok = opdr.id === 'wak' ? -lat > D.stapZij : daalRel > D.knie;
+              if (ok) { opdr.hold += dt; if (opdr.reactie === undefined) opdr.reactie = ot; }
+            }
+            if (zObj >= 0.6) { (opdr.hold >= (opdr.id === 'wak' ? D.stapTijd : D.knieTijd)) ? gelukt() : mislukt(); }   // pas oordelen als het voorbij is
+          }
         }
         if (opdr.klaar) {
-          doelPose.juich = opdr.gelukt && ot - (opdr.reactie || 0) < 2 ? 1 : 0;
-          if (opdr.id === 'wak' && opdr.gelukt && -lat > 0.12) zetWolk('Kom maar weer terug naar het midden');
-          if (ot > NADER + 3.5) {
-            resultaten.push({ naam: opdr.naam, gelukt: opdr.gelukt, reactie: opdr.reactie ? +opdr.reactie.toFixed(1) : null });
+          doelPose.juich = opdr.gelukt && ot - opdr.klaarT < 2 ? 1 : 0;
+          if (opdr.id === 'wak' && opdr.gelukt && -lat > 0.12 && ot - opdr.klaarT > 1.5) zetWolk('Kom maar weer terug naar het midden');
+          if (ot - opdr.klaarT > 3 && ot > NADER + 2) {
+            resultaten.push({ naam: opdr.naam, gelukt: opdr.gelukt, reactie: opdr.reactie !== undefined ? +opdr.reactie.toFixed(1) : null });
             toonResultaten(); plaatsObject(null); opdr = null; opdrIndex++; zetWolk(null);
           }
         }
@@ -407,19 +421,20 @@ function update(p, q, frame, ref, dt) {
           fase = 'einde'; faseT = 0; geluid.finish();
           const n = resultaten.filter(r => r.gelukt).length;
           zetWolk(`Gefinisht! ${n} van de 3 opdrachten gelukt.`, '#F6F01D'); gebeurtenis('finish', { score: n, slagen, afstand: Math.round(afstand) });
+          ritten.push({ score: n, slagen, afstand: Math.round(afstand), resultaten: [...resultaten] });
           toonResultaten();
         }
       }
       break;
     }
     case 'pauze':
-      staT = daal < D.knie ? staT + dt : 0;
+      staT = daal < 0.2 ? staT + dt : 0;
       if (staT > 1.0) { fase = pauzeVan; gebeurtenis('hervat'); zetWolk('We gaan verder!'); }
       break;
     case 'einde':
       doelPose.juich = 1;
       if (faseT > 4) zetWolk('Knijp om nog een keer te rijden.');
-      if (knijp) { knijp = false; plaatsObject(null); fase = 'uitleg'; stap = 2; faseT = 0; resultaten = []; slagen = 0; toonResultaten(); }
+      if (knijp) { knijp = false; plaatsObject(null); fase = 'uitleg'; stap = 2; faseT = 0; }
       break;
   }
   knijp = false;
@@ -445,7 +460,7 @@ function update(p, q, frame, ref, dt) {
   if (base) {
     if (Math.floor(tijd * 4) !== Math.floor((tijd - dt) * 4)) {
       const opdrNr = Math.min(opdrIndex + (opdr ? 1 : 0), 3);
-      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? `opdracht ${opdrNr}/3 · ${Math.round(v * 3.6)} km/u` : fase === 'einde' ? 'gefinisht!' : 'proefrit');
+      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : `opdracht ${opdrNr}/3 · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : 'proefrit');
     }
   }
 }
@@ -491,16 +506,19 @@ renderer.setAnimationLoop((t, frame) => {
 // ---------- Pagina ----------
 function toonResultaten() {
   const el = document.getElementById('resultaten');
-  if (!resultaten.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<table><tr><th>Opdracht</th><th>Resultaat</th><th>Reactietijd</th></tr>` +
-    resultaten.map(r => `<tr><td>${r.naam}</td><td class="${r.gelukt ? 'ok' : 'nee'}">${r.gelukt ? '✓' : '✗'}</td><td>${r.reactie !== null ? r.reactie + ' s' : '–'}</td></tr>`).join('') +
-    `</table><p>${slagen} schaatsslagen · ${Math.round(afstand)} m geschaatst</p>`;
+  const laatste = ritten[ritten.length - 1];
+  const r0 = resultaten.length ? { resultaten, slagen, afstand: Math.round(afstand) } : laatste;
+  if (!r0 || !r0.resultaten.length) { el.innerHTML = ''; return; }
+  el.innerHTML = (ritten.length > 1 ? `<p>Rit ${ritten.length}${resultaten.length ? ' (bezig)' : ''} · eerdere ritten: ${ritten.slice(0, -1).map(r => r.score + '/3').join(', ')}</p>` : '') +
+    `<table><tr><th>Opdracht</th><th>Resultaat</th><th>Reactietijd</th></tr>` +
+    r0.resultaten.map(r => `<tr><td>${r.naam}</td><td class="${r.gelukt ? 'ok' : 'nee'}">${r.gelukt ? '✓' : '✗'}</td><td>${r.reactie !== null ? r.reactie + ' s' : '–'}</td></tr>`).join('') +
+    `</table><p>${r0.slagen} schaatsslagen · ${r0.afstand} m geschaatst</p>`;
 }
 const downloadKnop = document.getElementById('download');
 downloadKnop.onclick = () => {
   const data = { app: 'iXbalance MR proefrit', versie: VERSIE, datum: new Date().toISOString(), instellingen: D, opdrachten: OPDRACHTEN,
     base: base && { y: base.y }, kolommen: ['t', 'opzij', 'vooruit', 'daal', 'handen', 'snelheid', 'fase', 'opdracht'],
-    frames: log, gebeurtenissen, resultaten, slagen, afstand };
+    frames: log, gebeurtenissen, resultaten, ritten, slagen, afstand };
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   const d = new Date(), z = x => String(x).padStart(2, '0');
   a.download = `ixbalance-mr-proefrit-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.json`;
@@ -526,7 +544,7 @@ startKnop.addEventListener('click', async () => {
       status.textContent = resultaten.length ? 'Resultaten van de proefrit:' : '';
     });
     base = null; anker = null; stilT = 0; fase = 'opstellen'; faseT = 0; v = 0; afstand = 0; slagen = 0; kant = 0;
-    opdr = null; opdrIndex = 0; resultaten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
+    opdr = null; opdrIndex = 0; resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
     zetWolk('Sta even stil en kijk recht vooruit');
     await renderer.xr.setSession(sessie);
     status.textContent = '';
