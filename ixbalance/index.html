@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iXbalance MR – herkenningsproef</title>
+<style>
+  :root{--paars:#662A88;--blauw:#43BFFD;--roze:#EB69BB;--geel:#F6F01D;--donker:#215C9A;--bg:#14101c;--kaart:#211a2e;--tekst:#f2eef8;--zacht:#b9aecb}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--tekst);display:flex;min-height:100vh;justify-content:center;padding:24px 16px}
+  .kaart{max-width:640px;width:100%}
+  h1{font-size:2rem;margin:0 0 .3rem}
+  h1 span{color:var(--geel)}
+  p{line-height:1.5;color:var(--zacht);margin:.5rem 0}
+  ol{color:var(--zacht);line-height:1.6;padding-left:1.3rem}
+  .vak{background:var(--kaart);border-radius:14px;padding:12px 14px;margin:1rem 0}
+  .vak b{color:var(--tekst)}
+  button{font:inherit;cursor:pointer;border:0;border-radius:12px}
+  #start{font-size:1.5rem;padding:1rem 2.4rem;background:var(--paars);color:#fff;margin-top:.4rem;border-bottom:4px solid var(--geel)}
+  #start:disabled{background:#4a4f57;border-color:#4a4f57;cursor:default}
+  .klein{font-size:.95rem;padding:.45rem 1rem;background:#2f2640;color:var(--tekst);margin:.3rem .3rem 0 0}
+  #status{margin-top:1rem;color:var(--geel);min-height:1.4em}
+  table{margin:1rem 0 0;border-collapse:collapse;font-size:.95rem;width:100%}
+  td,th{padding:5px 8px;border-bottom:1px solid #33294a;text-align:left}
+  th{color:var(--zacht);font-weight:600}
+  .ok{color:#5ee08a}.nee{color:#ff6b6b}
+  #versie{margin-top:1.4rem;font-size:.8rem;color:#6f6585}
+  [hidden]{display:none!important}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="kaart">
+  <h1>iXbalance <span>MR</span></h1>
+  <p><b>Herkenningsproef:</b> tien bewegingen uit de Elfstedentocht. We testen of de Quest ze goed herkent. Doel: 10 van 10.</p>
+  <div class="vak">
+    <b>Voor je begint</b>
+    <ol>
+      <li>Leg de controllers weg: de proef werkt met <b>je handen</b>.</li>
+      <li>Vrije plek van ongeveer 2×2 m, een stoel binnen handbereik.</li>
+      <li>Druk op Start, ga ontspannen staan en kijk recht vooruit. Na 3 seconden stilstaan ben je opgesteld.</li>
+      <li>Knijp duim en wijsvinger samen om te beginnen. Elke beweging krijgt 15 seconden en één herkansing.</li>
+      <li>Ga je zitten, dan pauzeert de proef.</li>
+    </ol>
+  </div>
+  <div class="vak">
+    <b>Stem</b>
+    <div id="spraakInfo">Bezig met zoeken…</div>
+    <button class="klein" id="testStem">Test de stem</button>
+    <label style="margin-left:.6rem"><input type="checkbox" id="spraakAan" checked> stem aan</label>
+  </div>
+  <button id="start" disabled>Even geduld…</button>
+  <div id="status"></div>
+  <div id="resultaten"></div>
+  <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
+  <div id="versie">versie 0.1</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+const VERSIE = '0.1';
+
+// ---------- Instellingen (in meters en seconden) ----------
+const D = {
+  gewicht: 0.05,        // hoofd zo ver opzij = gewicht verplaatst
+  gewichtMax: 0.15,     // verder dan dit is geen gewichtsverplaatsing meer maar een stap
+  slag: 0.04,           // schaatsslag: voorbij deze afstand links/rechts
+  stapZij: 0.18, stapVoor: 0.18, stapAchter: 0.14,
+  terug: 0.08,          // binnen deze afstand van de startplek = terug
+  stilSnelheid: 0.12,   // m/s: langzamer = stilstaan
+  stilTijd: 0.3,
+  knie: 0.08,           // hoofd zo veel lager = door de knieën
+  zitten: 0.30,         // hoofd zo veel lager = zitten (pauze)
+  vasthouden: 1.5,      // seconden gewicht vasthouden
+  knieTijd: 1.0,
+  handenWeg: 2.0,       // seconden geen handen in beeld = handen op de rug
+  knopAfstand: 0.08,
+  opstelTijd: 3.0, opstelMarge: 0.015,
+  limiet: 15
+};
+const PROEF = [
+  { id: 'gewicht-L', titel: 'Gewicht naar links',  zin: 'Verplaats je gewicht naar links, en houd het even vast.', soort: 'gewicht', kant: -1 },
+  { id: 'gewicht-R', titel: 'Gewicht naar rechts', zin: 'Verplaats je gewicht naar rechts, en houd het even vast.', soort: 'gewicht', kant: 1 },
+  { id: 'slagen',    titel: 'Vier schaatsslagen',  zin: 'Maak vier schaatsslagen. Links, rechts, links, rechts.', soort: 'slagen', aantal: 4 },
+  { id: 'zij-L',     titel: 'Stap opzij naar links',  zin: 'Zet een stap opzij naar links, en kom weer terug.', soort: 'stap', richting: 'links' },
+  { id: 'zij-R',     titel: 'Stap opzij naar rechts', zin: 'Zet een stap opzij naar rechts, en kom weer terug.', soort: 'stap', richting: 'rechts' },
+  { id: 'voor',      titel: 'Stap naar voren',     zin: 'Zet een stap naar voren, en kom weer terug.', soort: 'stap', richting: 'voor' },
+  { id: 'achter',    titel: 'Stap naar achteren',  zin: 'Zet een kleine stap naar achteren, en kom weer terug.', soort: 'stap', richting: 'achter' },
+  { id: 'knie',      titel: 'Door de knieën',      zin: 'Zak een stukje door je knieën, en blijf even zo.', soort: 'knie' },
+  { id: 'rug',       titel: 'Handen op de rug',    zin: 'Houd je handen eerst even voor je. Leg ze dan op je rug, en houd ze daar.', soort: 'rug', kort: 'Eerst handen voor je, dan op je rug' },
+  { id: 'knop',      titel: 'Tik de gele knop aan', zin: 'Tik met je wijsvinger de gele knop aan.', soort: 'knop' }
+];
+const K = { paars: '#662A88', blauw: '#43BFFD', roze: '#EB69BB', geel: '#F6F01D', donker: '#215C9A', groen: '#5ee08a', rood: '#ff6b6b', wit: '#ffffff' };
+
+// ---------- Stem ----------
+let stem = null;
+const spraakInfo = document.getElementById('spraakInfo');
+const spraakAan = document.getElementById('spraakAan');
+function laadStemmen() {
+  const lijst = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
+  stem = lijst.find(v => /^nl[-_]NL/i.test(v.lang)) || lijst.find(v => /^nl/i.test(v.lang)) || null;
+  if (!window.speechSynthesis) spraakInfo.textContent = 'Deze browser heeft geen spraak. De proef werkt met tekst en geluid.';
+  else if (stem) spraakInfo.textContent = `Nederlandse stem gevonden: ${stem.name} (${stem.lang}).`;
+  else spraakInfo.textContent = `Geen Nederlandse stem gevonden (${lijst.length} andere stemmen). De proef werkt met tekst en geluid.`;
+}
+if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = laadStemmen; }
+laadStemmen(); setTimeout(laadStemmen, 1000);
+let stemTimer = null;
+function zeg(tekst) {
+  if (!window.speechSynthesis || !stem || !spraakAan.checked) return;
+  try {
+    speechSynthesis.cancel(); clearTimeout(stemTimer);
+    const u = new SpeechSynthesisUtterance(tekst);
+    u.voice = stem; u.lang = stem.lang; u.rate = 0.95; u.pitch = 1.0;
+    speechSynthesis.speak(u);
+    stemTimer = setTimeout(() => speechSynthesis.cancel(), 1500 + 90 * tekst.length);
+  } catch (e) {}
+}
+document.getElementById('testStem').onclick = () => { laadStemmen(); zeg('Welkom bij de Elfstedentocht. Dit is een test van de stem.'); };
+
+// ---------- three.js + WebXR ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.domElement.style.display = 'none';
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, 1, 0.01, 50);
+const plat = g => g.rotateX(-Math.PI / 2);
+const basisMat = c => new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.85, depthWrite: false });
+
+// voetafdrukken op de startplek (links roze, rechts blauw)
+const voeten = new THREE.Group(); voeten.visible = false; scene.add(voeten);
+const voetGeo = plat(new THREE.CircleGeometry(1, 32));
+const voetL = new THREE.Mesh(voetGeo, basisMat(K.roze)); voetL.scale.set(0.05, 1, 0.12);
+const voetR = new THREE.Mesh(voetGeo, basisMat(K.blauw)); voetR.scale.set(0.05, 1, 0.12);
+voetL.position.set(-0.1, 0.01, 0); voetR.position.set(0.1, 0.01, 0);
+const thuisRing = new THREE.Mesh(plat(new THREE.RingGeometry(D.terug - 0.008, D.terug, 48)), basisMat(K.wit));
+thuisRing.position.y = 0.012;
+voeten.add(voetL, voetR, thuisRing);
+
+// gele stip onder je hoofd
+const stip = new THREE.Mesh(plat(new THREE.CircleGeometry(0.025, 32)), basisMat(K.geel));
+stip.visible = false; scene.add(stip);
+
+// doelring voor stappen
+const doelRing = new THREE.Mesh(plat(new THREE.RingGeometry(0.1, 0.13, 48)), basisMat(K.geel));
+doelRing.visible = false; scene.add(doelRing);
+
+// gele knop
+const knop = new THREE.Mesh(new THREE.SphereGeometry(0.055, 32, 16), new THREE.MeshBasicMaterial({ color: K.geel }));
+knop.visible = false; scene.add(knop);
+
+// scorebord
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 1024; hudCanvas.height = 640;
+const hc = hudCanvas.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCanvas); hudTex.colorSpace = THREE.SRGBColorSpace;
+const hud = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.4375), new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthWrite: false }));
+hud.visible = false; scene.add(hud);
+
+function past(g, tekst, px, gewicht, max = 940) {   // lettergrootte verkleinen tot de tekst past
+  let f = px; g.font = `${gewicht} ${f}px system-ui, sans-serif`;
+  while (f > 20 && g.measureText(tekst).width > max) { f -= 2; g.font = `${gewicht} ${f}px system-ui, sans-serif`; }
+}
+function tekenHUD({ titel = '', kleur = K.wit, groot = '', r1 = '', r2 = '', balk = null, meter = null, boven = '' }) {
+  const g = hc;
+  g.clearRect(0, 0, 1024, 640);
+  g.fillStyle = 'rgba(102,42,136,0.92)'; g.beginPath(); g.roundRect(8, 8, 1008, 624, 36); g.fill();
+  g.fillStyle = K.geel; g.fillRect(40, 616, 944, 10);
+  g.textAlign = 'center';
+  if (boven) { g.fillStyle = 'rgba(255,255,255,0.7)'; g.font = '34px system-ui, sans-serif'; g.fillText(boven, 512, 62); }
+  g.fillStyle = kleur; past(g, titel, 72, 'bold'); g.fillText(titel, 512, boven ? 140 : 120);
+  if (groot !== '') { g.fillStyle = K.wit; g.font = 'bold 130px system-ui, sans-serif'; g.fillText(groot, 512, 290); }
+  if (balk !== null) {
+    g.fillStyle = 'rgba(255,255,255,0.18)'; g.beginPath(); g.roundRect(112, 330, 800, 30, 15); g.fill();
+    g.fillStyle = K.geel; g.beginPath(); g.roundRect(112, 330, Math.max(30, 800 * Math.min(1, balk)), 30, 15); g.fill();
+  }
+  if (meter !== null) {   // gewichtsmeter: -0,2 m … +0,2 m
+    const x0 = 512, s = 400 / 0.2, y = 400;
+    g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(112, y - 6, 800, 12);
+    g.fillStyle = 'rgba(246,240,29,0.35)';
+    g.fillRect(x0 - D.gewichtMax * s, y - 14, (D.gewichtMax - D.gewicht) * s, 28);
+    g.fillRect(x0 + D.gewicht * s, y - 14, (D.gewichtMax - D.gewicht) * s, 28);
+    g.fillStyle = K.wit; g.fillRect(x0 - 2, y - 20, 4, 40);
+    const mx = x0 + Math.max(-0.2, Math.min(0.2, meter)) * s;
+    g.fillStyle = K.geel; g.beginPath(); g.arc(mx, y, 18, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.7)'; g.font = '30px system-ui, sans-serif';
+    g.textAlign = 'left'; g.fillText('links', 112, y + 52); g.textAlign = 'right'; g.fillText('rechts', 912, y + 52); g.textAlign = 'center';
+  }
+  g.fillStyle = K.wit; past(g, r1, 44, 'normal'); g.fillText(r1, 512, 500);
+  g.fillStyle = 'rgba(255,255,255,0.75)'; past(g, r2, 36, 'normal'); g.fillText(r2, 512, 570);
+  hudTex.needsUpdate = true;
+}
+
+// ---------- Geluid ----------
+let audio = null;
+function toon(freq, duur = 0.15, vertraging = 0, vol = 0.25) {
+  if (!audio) return;
+  const t0 = audio.currentTime + vertraging;
+  const o = audio.createOscillator(), gn = audio.createGain();
+  o.frequency.value = freq;
+  gn.gain.setValueAtTime(vol, t0); gn.gain.exponentialRampToValueAtTime(0.001, t0 + duur);
+  o.connect(gn).connect(audio.destination); o.start(t0); o.stop(t0 + duur);
+}
+const geluid = {
+  tik: () => toon(660, 0.1),
+  half: () => toon(990, 0.12),
+  goed: () => { toon(784, 0.12); toon(1175, 0.25, 0.1); },
+  mis: () => toon(260, 0.3, 0, 0.2),
+  einde: () => { toon(784, 0.15); toon(988, 0.15, 0.12); toon(1319, 0.35, 0.24); }
+};
+
+// ---------- Status ----------
+let geplaatst = false, knijp = false, vorigeT = null, hudKlok = 0, tijd = 0;
+let fase = 'opstellen', faseTijd = 0, vorigeFase = null;
+let base = null;                         // { x, z, y, vooruit, rechts }
+let anker = null, stilTeller = 0;        // opstellen
+let item = 0, poging = 1, sub = {};
+let resultaten = [], log = [], gebeurtenissen = [];
+let vorigePos = null, snelheid = 0, zitTeller = 0, staTeller = 0;
+
+function gebeurtenis(type, extra = {}) { gebeurtenissen.push({ t: +tijd.toFixed(2), type, item: PROEF[item]?.id, poging, ...extra }); }
+function nieuwSub() { sub = { hold: 0, max: 0, n: 0, kant: 0, stap: 0, stilT: 0 }; }
+
+function zetBase(p, q) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+  const vooruit = new THREE.Vector2(f.x, f.z); if (vooruit.lengthSq() < 1e-4) vooruit.set(0, -1); vooruit.normalize();
+  const rechts = new THREE.Vector2(-vooruit.y, vooruit.x);
+  base = { x: p.x, z: p.z, y: p.y, vooruit, rechts };
+  const yaw = Math.atan2(-vooruit.x, -vooruit.y);
+  voeten.position.set(p.x, 0, p.z); voeten.rotation.y = yaw; voeten.visible = true;
+  hud.position.set(p.x + vooruit.x * 1.6, Math.max(p.y + 0.05, 1.0), p.z + vooruit.y * 1.6);
+  hud.lookAt(p.x, hud.position.y, p.z);
+  gebeurtenis('opgesteld', { x: +p.x.toFixed(3), z: +p.z.toFixed(3), y: +p.y.toFixed(3) });
+}
+function wereldPunt(lat, fwd, y) {   // positie t.o.v. de startplek
+  return new THREE.Vector3(base.x + base.rechts.x * lat + base.vooruit.x * fwd, y, base.z + base.rechts.y * lat + base.vooruit.y * fwd);
+}
+
+function handInfo(frame, ref) {
+  const punten = []; let polsen = 0;
+  for (const bron of frame.session.inputSources) {
+    if (bron.hand) {
+      const pols = bron.hand.get('wrist'), top = bron.hand.get('index-finger-tip');
+      const pp = pols && frame.getJointPose(pols, ref);
+      const tp = top && frame.getJointPose(top, ref);
+      if (pp) polsen++;
+      if (tp) punten.push(tp.transform.position);
+    } else if (bron.gripSpace) {
+      const gp = frame.getPose(bron.gripSpace, ref);
+      if (gp && !gp.emulatedPosition) { polsen++; punten.push(gp.transform.position); }
+    }
+  }
+  return { punten, aantal: polsen };
+}
+
+function startItem() {
+  nieuwSub(); faseTijd = 0; fase = 'bezig';
+  const P = PROEF[item];
+  zeg(poging === 1 ? P.zin : 'Nog een keer. ' + P.zin);
+  gebeurtenis('start');
+  doelRing.visible = false; knop.visible = false;
+  if (P.soort === 'stap') {
+    const d = { links: [-0.3, 0], rechts: [0.3, 0], voor: [0, 0.3], achter: [0, -0.25] }[P.richting];
+    doelRing.position.copy(wereldPunt(d[0], d[1], 0.013)); doelRing.material.color.set(K.geel); doelRing.visible = true;
+  }
+  if (P.soort === 'knop') { knop.position.copy(wereldPunt(0.2, 0.45, base.y - 0.35)); knop.visible = true; }
+}
+
+function afronden(gelukt, waarde) {
+  const P = PROEF[item];
+  resultaten.push({ nr: item + 1, id: P.id, titel: P.titel, gelukt, poging, tijd: +faseTijd.toFixed(1), waarde });
+  gebeurtenis(gelukt ? 'gelukt' : 'mislukt', { waarde });
+  doelRing.visible = false; knop.visible = false;
+  if (gelukt) { geluid.goed(); zeg('Goed zo!'); } else { geluid.mis(); zeg('Dat lukte niet, we gaan verder.'); }
+  fase = 'goed'; faseTijd = 0; sub.gelukt = gelukt;
+  toonResultaten();
+}
+
+function controleer(P, lat, fwd, daal, handen, dt) {
+  const stil = snelheid < D.stilSnelheid;
+  sub.stilT = stil ? sub.stilT + dt : 0;
+  const afstand = Math.hypot(lat, fwd);
+  switch (P.soort) {
+    case 'gewicht': {
+      const inZone = P.kant * lat > D.gewicht && Math.abs(lat) < D.gewichtMax && Math.abs(fwd) < 0.1;
+      sub.max = Math.max(sub.max, P.kant * lat);
+      sub.hold = inZone ? sub.hold + dt : Math.max(0, sub.hold - 2 * dt);
+      if (sub.hold >= D.vasthouden) afronden(true, `${(sub.max * 100).toFixed(1)} cm opzij`);
+      return sub.hold / D.vasthouden;
+    }
+    case 'slagen': {
+      if (lat > D.slag && sub.kant !== 1) { sub.kant = 1; sub.n++; geluid.tik(); }
+      if (lat < -D.slag && sub.kant !== -1) { sub.kant = -1; sub.n++; geluid.tik(); }
+      sub.max = Math.max(sub.max, Math.abs(lat));
+      if (sub.n >= P.aantal) afronden(true, `${sub.n} slagen, max ${(sub.max * 100).toFixed(1)} cm`);
+      return sub.n / P.aantal;
+    }
+    case 'stap': {
+      const m = { links: -lat, rechts: lat, voor: fwd, achter: -fwd }[P.richting];
+      const drempel = { links: D.stapZij, rechts: D.stapZij, voor: D.stapVoor, achter: D.stapAchter }[P.richting];
+      sub.max = Math.max(sub.max, m);
+      if (sub.stap === 0 && m > drempel && sub.stilT > D.stilTijd) { sub.stap = 1; geluid.half(); doelRing.material.color.set(K.groen); gebeurtenis('stap-uit', { m: +m.toFixed(3) }); }
+      if (sub.stap === 1 && afstand < D.terug && sub.stilT > D.stilTijd) afronden(true, `${(sub.max * 100).toFixed(0)} cm`);
+      return sub.stap === 0 ? Math.min(0.5, 0.5 * Math.max(0, m) / drempel) : 0.5 + 0.5 * Math.max(0, 1 - (afstand - D.terug) / drempel);
+    }
+    case 'knie': {
+      sub.max = Math.max(sub.max, daal);
+      sub.hold = daal > D.knie ? sub.hold + dt : 0;
+      if (sub.hold >= D.knieTijd) afronden(true, `${(sub.max * 100).toFixed(0)} cm gezakt`);
+      return sub.hold / D.knieTijd;
+    }
+    case 'rug': {
+      // eerst beide handen voor je laten zien, dan uit beeld (op de rug)
+      if (sub.stap === 0) { sub.voor = handen.aantal >= 2 ? (sub.voor || 0) + dt : 0; if (sub.voor > 0.5) { sub.stap = 1; geluid.half(); } return 0; }
+      sub.hold = (handen.aantal === 0 && daal < D.knie) ? sub.hold + dt : 0;
+      sub.max = Math.max(sub.max, sub.hold);
+      if (sub.hold >= D.handenWeg) afronden(true, `${sub.hold.toFixed(1)} s handen weg`);
+      return sub.hold / D.handenWeg;
+    }
+    case 'knop': {
+      const raak = handen.punten.some(h => Math.hypot(h.x - knop.position.x, h.y - knop.position.y, h.z - knop.position.z) < D.knopAfstand);
+      if (raak) afronden(true, `na ${faseTijd.toFixed(1)} s`);
+      return 0;
+    }
+  }
+  return 0;
+}
+
+function update(p, q, frame, ref, dt) {
+  tijd += dt; faseTijd += dt;
+  const geknepen = knijp; knijp = false;
+  stip.position.set(p.x, 0.014, p.z);
+  if (vorigePos && dt > 0) { const v = Math.hypot(p.x - vorigePos.x, p.z - vorigePos.z) / dt; snelheid += 0.3 * (v - snelheid); }
+  vorigePos = { x: p.x, z: p.z };
+  const handen = handInfo(frame, ref);
+
+  let lat = 0, fwd = 0, daal = 0;
+  if (base) {
+    const ox = p.x - base.x, oz = p.z - base.z;
+    lat = ox * base.rechts.x + oz * base.rechts.y;
+    fwd = ox * base.vooruit.x + oz * base.vooruit.y;
+    daal = base.y - p.y;
+  }
+  if (log.length < 30000 && (!log.length || tijd - log[log.length - 1][0] >= 0.033)) {
+    log.push([+tijd.toFixed(3), +p.x.toFixed(4), +p.y.toFixed(4), +p.z.toFixed(4), +lat.toFixed(4), +fwd.toFixed(4), handen.aantal, fase]);
+  }
+
+  // veiligheid: zitten = pauze
+  if (base && fase !== 'pauze' && fase !== 'opstellen') {
+    zitTeller = daal > D.zitten ? zitTeller + dt : 0;
+    if (zitTeller > 0.5) { vorigeFase = fase; fase = 'pauze'; faseTijd = 0; staTeller = 0; zeg('Pauze. Sta weer op als je verder wilt.'); gebeurtenis('pauze'); doelRing.visible = false; knop.visible = false; }
+  }
+
+  let voortgang = null;
+  switch (fase) {
+    case 'opstellen': {
+      if (!anker || Math.hypot(p.x - anker.x, p.z - anker.z, p.y - anker.y) > D.opstelMarge) { anker = { x: p.x, y: p.y, z: p.z }; stilTeller = 0; }
+      else stilTeller += dt;
+      voortgang = stilTeller / D.opstelTijd;
+      if (stilTeller >= D.opstelTijd) { zetBase(p, q); fase = 'klaar'; faseTijd = 0; geluid.goed(); zeg('Je bent opgesteld. Knijp je duim en wijsvinger samen om te beginnen.'); }
+      break;
+    }
+    case 'klaar':
+      if (geknepen) { item = 0; poging = 1; resultaten = []; toonResultaten(); fase = 'terug'; faseTijd = 0; }
+      break;
+    case 'terug':   // eerst terug naar de startplek, dan de volgende beweging
+      sub.stilT = (Math.hypot(lat, fwd) < D.terug && Math.abs(daal) < 0.05 && snelheid < D.stilSnelheid) ? (sub.stilT || 0) + dt : 0;
+      if (sub.stilT > 0.5) startItem();
+      break;
+    case 'bezig': {
+      voortgang = controleer(PROEF[item], lat, fwd, daal, handen, dt);
+      if (fase === 'bezig' && faseTijd > D.limiet) {
+        if (poging === 1) { poging = 2; geluid.mis(); gebeurtenis('herkansing'); fase = 'terug'; faseTijd = 0; sub = { stilT: 0 }; doelRing.visible = false; knop.visible = false; }
+        else afronden(false, `max ${(sub.max * 100).toFixed(1)}`);
+      }
+      break;
+    }
+    case 'goed':
+      if (faseTijd > 1.5) {
+        item++; poging = 1; sub = { stilT: 0 };
+        if (item >= PROEF.length) { fase = 'einde'; faseTijd = 0; geluid.einde(); const n = resultaten.filter(r => r.gelukt).length; zeg(`Klaar! ${n} van de ${PROEF.length} bewegingen herkend.`); gebeurtenis('einde', { score: n }); toonResultaten(); }
+        else { fase = 'terug'; faseTijd = 0; }
+      }
+      break;
+    case 'pauze':
+      staTeller = daal < D.knie ? staTeller + dt : 0;
+      if (staTeller > 1.0) { fase = 'terug'; faseTijd = 0; sub = { stilT: 0 }; zeg('We gaan verder.'); gebeurtenis('hervat'); }
+      break;
+    case 'einde':
+      if (geknepen) { item = 0; poging = 1; resultaten = []; toonResultaten(); fase = 'terug'; faseTijd = 0; }
+      break;
+  }
+
+  // scorebord
+  hudKlok += dt; if (hudKlok < 0.08) return; hudKlok = 0;
+  const P = PROEF[item];
+  const nr = `Beweging ${Math.min(item + 1, PROEF.length)} van ${PROEF.length}${poging === 2 ? ' · herkansing' : ''}`;
+  if (fase === 'opstellen') tekenHUD({ titel: 'Opstellen', kleur: K.geel, r1: 'Sta ontspannen, voeten op heupbreedte', r2: 'Kijk recht vooruit en sta even stil', balk: voortgang });
+  else if (fase === 'klaar') tekenHUD({ titel: 'Opgesteld!', kleur: K.geel, r1: 'Knijp duim en wijsvinger om te beginnen', r2: 'Leg de controllers weg, gebruik je handen' });
+  else if (fase === 'terug') tekenHUD({ boven: nr, titel: P.titel, kleur: K.geel, r1: 'Ga op je startplek staan', r2: 'Op de voetjes, even stilstaan', meter: lat });
+  else if (fase === 'bezig') tekenHUD({ boven: nr, titel: P.titel, kleur: K.geel,
+      groot: P.soort === 'slagen' ? `${sub.n} / ${P.aantal}` : '',
+      r1: P.kort || P.zin.replace(/\.$/, ''), r2: `nog ${Math.max(0, Math.ceil(D.limiet - faseTijd))} s`,
+      balk: P.soort === 'knop' || P.soort === 'slagen' ? null : voortgang,
+      meter: (P.soort === 'gewicht' || P.soort === 'slagen') ? lat : null });
+  else if (fase === 'goed') tekenHUD({ boven: nr, titel: sub.gelukt ? 'Goed zo!' : 'Volgende', kleur: sub.gelukt ? K.groen : K.rood, r1: resultaten[resultaten.length - 1]?.waarde || '', r2: '' });
+  else if (fase === 'pauze') tekenHUD({ titel: 'Pauze', kleur: K.blauw, r1: 'Je zit: de proef staat stil', r2: 'Sta weer op om verder te gaan' });
+  else if (fase === 'einde') { const n = resultaten.filter(r => r.gelukt).length; tekenHUD({ titel: 'Klaar!', kleur: K.groen, groot: `${n} / ${PROEF.length}`, r1: 'bewegingen herkend', r2: 'Knijp om opnieuw te doen, of zet de bril af' }); }
+}
+
+renderer.setAnimationLoop((t, frame) => {
+  if (frame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = frame.getViewerPose(ref);
+    if (pose) {
+      const dt = vorigeT === null ? 0 : Math.min((t - vorigeT) / 1000, 0.1);
+      vorigeT = t;
+      const p = pose.transform.position, o = pose.transform.orientation;
+      const q = new THREE.Quaternion(o.x, o.y, o.z, o.w);
+      if (!geplaatst) {
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+        const v = new THREE.Vector2(f.x, f.z).normalize();
+        hud.position.set(p.x + v.x * 1.6, Math.max(p.y + 0.05, 1.0), p.z + v.y * 1.6); hud.lookAt(p.x, hud.position.y, p.z);
+        hud.visible = true; stip.visible = true; geplaatst = true;
+      }
+      update(p, q, frame, ref, dt);
+    }
+  }
+  renderer.render(scene, camera);
+});
+
+// ---------- Pagina: resultaten en meetbestand ----------
+function toonResultaten() {
+  const el = document.getElementById('resultaten');
+  if (!resultaten.length) { el.innerHTML = ''; return; }
+  const n = resultaten.filter(r => r.gelukt).length;
+  el.innerHTML = `<table><tr><th>#</th><th>Beweging</th><th>Resultaat</th><th>Tijd</th><th>Meting</th></tr>` +
+    resultaten.map(r => `<tr><td>${r.nr}</td><td>${r.titel}</td><td class="${r.gelukt ? 'ok' : 'nee'}">${r.gelukt ? (r.poging === 1 ? '✓' : '✓ (2e keer)') : '✗'}</td><td>${r.tijd} s</td><td>${r.waarde}</td></tr>`).join('') +
+    `</table><p><b>${n} van ${resultaten.length}</b> herkend.</p>`;
+}
+const downloadKnop = document.getElementById('download');
+downloadKnop.onclick = () => {
+  const data = { app: 'iXbalance MR herkenningsproef', versie: VERSIE, datum: new Date().toISOString(), drempels: D,
+    base: base && { x: base.x, y: base.y, z: base.z, vooruit: [base.vooruit.x, base.vooruit.y] },
+    kolommen: ['t', 'x', 'y', 'z', 'opzij', 'vooruit', 'handen', 'fase'], frames: log, gebeurtenissen, resultaten,
+    stem: stem ? `${stem.name} (${stem.lang})` : null };
+  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  const d = new Date(); const pad = x => String(x).padStart(2, '0');
+  a.download = `ixbalance-mr-proef-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+};
+
+// ---------- Start ----------
+const startKnop = document.getElementById('start');
+const status = document.getElementById('status');
+function nietBeschikbaar(t) { startKnop.textContent = 'Niet beschikbaar'; startKnop.disabled = true; status.textContent = t; }
+if (!('xr' in navigator)) nietBeschikbaar('Deze browser ondersteunt geen WebXR. Open deze pagina in de browser van de Meta Quest.');
+else navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+  if (ok) { startKnop.disabled = false; startKnop.textContent = 'Start'; }
+  else nietBeschikbaar('Mixed reality wordt hier niet ondersteund. Open deze pagina in de browser van de Meta Quest.');
+}).catch(() => nietBeschikbaar('WebXR-controle mislukt.'));
+
+startKnop.addEventListener('click', async () => {
+  try {
+    if (!audio) audio = new AudioContext();
+    laadStemmen();
+    const sessie = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
+    sessie.addEventListener('select', () => { knijp = true; });
+    sessie.addEventListener('end', () => {
+      geplaatst = false; vorigeT = null; vorigePos = null;
+      [voeten, stip, hud, doelRing, knop].forEach(m => m.visible = false);
+      startKnop.textContent = 'Opnieuw starten';
+      downloadKnop.hidden = log.length === 0;
+      status.textContent = resultaten.length ? 'Resultaten van de proef:' : '';
+      if (window.speechSynthesis) speechSynthesis.cancel();
+    });
+    // nieuwe sessie: opnieuw opstellen
+    base = null; anker = null; stilTeller = 0; fase = 'opstellen'; faseTijd = 0; item = 0; poging = 1;
+    resultaten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
+    await renderer.xr.setSession(sessie);
+    status.textContent = '';
+    zeg('Ga ontspannen staan en kijk recht vooruit.');
+  } catch (e) {
+    status.textContent = 'Starten mislukt: ' + e.message;
+  }
+});
+window.ixbalance = { get fase() { return fase; }, get item() { return item; }, get resultaten() { return resultaten; }, D, PROEF };
+</script>
+</body>
+</html>
