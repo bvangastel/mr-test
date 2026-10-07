@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MR-stappentest</title>
+<style>
+  body{margin:0;font-family:system-ui,sans-serif;background:#10141a;color:#eef2f7;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:16px;box-sizing:border-box}
+  .kaart{max-width:540px}
+  h1{font-size:1.9rem;margin:0 0 .6rem}
+  p{line-height:1.5;color:#c8d0dc}
+  button{font-size:1.5rem;padding:1rem 2.4rem;border:0;border-radius:14px;background:#2f7cf6;color:#fff;cursor:pointer;margin-top:.8rem}
+  button:disabled{background:#4a4f57;cursor:default}
+  #status{margin-top:1rem;font-size:1rem;color:#ffcf6b;min-height:1.5em}
+  #versie{margin-top:1.5rem;font-size:.8rem;color:#6b7480}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="kaart">
+  <h1>MR-stappentest</h1>
+  <p>Ga op een vrije plek staan (± 2×2 m), kijk recht vooruit en druk op <b>Start</b>.
+     Er verschijnen tegels op je vloer. Stap naar de <b style="color:#4da3ff">blauwe</b> tegel
+     en daarna terug naar het <b>witte</b> midden.</p>
+  <p>Tegels opnieuw neerleggen rond je huidige plek: knijp duim en wijsvinger samen (of druk op de trekker).</p>
+  <button id="start" disabled>Even geduld…</button>
+  <div id="status"></div>
+  <div id="versie">versie 0.1</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- Instellingen (hier kun je aan draaien) ----------
+const INST = {
+  afstandTegel: 0.50,   // meter van midden tot doeltegel
+  tegelMaat: 0.36,      // breedte van een tegel in meter
+  drempelVooruit: 0.22, // zo ver moet je hoofd richting de doeltegel bewegen
+  drempelZij: 0.20,     // maximale afwijking opzij
+  drempelMidden: 0.12,  // binnen deze straal sta je 'in het midden'
+  wachttijd: 0.30,      // zo lang (s) moet je blijven staan voordat het telt
+  pauzeNaPlaatsen: 1.5  // even rust na het neerleggen van de tegels
+};
+// richtingen t.o.v. waar je naar kijkt (graden, positief = links)
+const RICHTINGEN = [0, 45, 90, -45, -90];
+
+// ---------- Basis three.js + WebXR ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);           // transparant = passthrough zichtbaar
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor'); // y = 0 is je vloer
+renderer.domElement.style.display = 'none';
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 50);
+
+// ---------- Tegels ----------
+function tegelMateriaal(vulling, rand) {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = vulling; g.beginPath(); g.roundRect(12, 12, 232, 232, 28); g.fill();
+  g.lineWidth = 16; g.strokeStyle = rand; g.stroke();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+}
+const MAT = {
+  rust:   tegelMateriaal('rgba(160,170,185,0.12)', 'rgba(200,210,225,0.45)'),
+  midden: tegelMateriaal('rgba(255,255,255,0.30)', 'rgba(255,255,255,0.95)'),
+  doel:   tegelMateriaal('rgba(40,130,255,0.45)',  'rgba(90,170,255,1)'),
+  goed:   tegelMateriaal('rgba(40,200,90,0.50)',   'rgba(90,240,130,1)')
+};
+const vlakGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+
+function maakTegel() {
+  const m = new THREE.Mesh(vlakGeo, MAT.rust);
+  m.scale.setScalar(INST.tegelMaat);
+  m.visible = false;
+  scene.add(m);
+  return m;
+}
+const midden = maakTegel();
+const tegels = RICHTINGEN.map(() => maakTegel());
+
+// gele stip op de vloer recht onder je hoofd (laat zien wat de game 'ziet')
+const stip = new THREE.Mesh(
+  new THREE.RingGeometry(0.035, 0.05, 32).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthWrite: false })
+);
+stip.visible = false; scene.add(stip);
+
+// ---------- Scorebord (HUD) ----------
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 1024; hudCanvas.height = 512;
+const hudCtx = hudCanvas.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCanvas); hudTex.colorSpace = THREE.SRGBColorSpace;
+const hud = new THREE.Mesh(new THREE.PlaneGeometry(0.64, 0.32),
+  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthWrite: false }));
+hud.visible = false; scene.add(hud);
+
+function tekenHUD(titel, kleur, hoofdhoogte) {
+  const g = hudCtx;
+  g.clearRect(0, 0, 1024, 512);
+  g.fillStyle = 'rgba(15,20,28,0.72)'; g.beginPath(); g.roundRect(8, 8, 1008, 496, 40); g.fill();
+  g.textAlign = 'center';
+  g.fillStyle = kleur; g.font = 'bold 76px system-ui, sans-serif'; g.fillText(titel, 512, 130);
+  g.fillStyle = '#ffffff'; g.font = 'bold 120px system-ui, sans-serif'; g.fillText(String(score), 512, 285);
+  g.fillStyle = '#c8d0dc'; g.font = '48px system-ui, sans-serif';
+  const gem = tijden.length ? (tijden.reduce((a, b) => a + b, 0) / tijden.length).toFixed(2) + ' s' : '–';
+  const laatste = tijden.length ? tijden[tijden.length - 1].toFixed(2) + ' s' : '–';
+  g.fillText(`laatste ${laatste}   ·   gemiddeld ${gem}`, 512, 375);
+  g.fillStyle = '#6b7480'; g.font = '36px system-ui, sans-serif';
+  g.fillText(`hoofdhoogte ${hoofdhoogte.toFixed(2)} m`, 512, 450);
+  hudTex.needsUpdate = true;
+}
+
+// ---------- Geluid ----------
+let audio = null;
+function toon(freq, duur = 0.15, vertraging = 0) {
+  if (!audio) return;
+  const t0 = audio.currentTime + vertraging;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.25, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + duur);
+  o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + duur);
+}
+
+// ---------- Spellogica ----------
+const oorsprong = new THREE.Vector2(), vooruit = new THREE.Vector2(), links = new THREE.Vector2();
+let geplaatst = false, opnieuwPlaatsen = false;
+let toestand = 'naarMidden', doel = -1, timer = 0, startTijd = 0, score = 0, tijden = [];
+let vorigeT = null, hudKlok = 0;
+
+function plaats(p, o) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(o.x, o.y, o.z, o.w));
+  vooruit.set(f.x, f.z);
+  if (vooruit.lengthSq() < 1e-4) vooruit.set(0, -1);
+  vooruit.normalize();
+  links.set(vooruit.y, -vooruit.x);
+  oorsprong.set(p.x, p.z);
+  const yaw = Math.atan2(-vooruit.x, -vooruit.y);
+
+  midden.position.set(p.x, 0.01, p.z); midden.rotation.y = yaw; midden.visible = true;
+  RICHTINGEN.forEach((graden, i) => {
+    const a = THREE.MathUtils.degToRad(graden);
+    const dir = new THREE.Vector2(
+      vooruit.x * Math.cos(a) + links.x * Math.sin(a),
+      vooruit.y * Math.cos(a) + links.y * Math.sin(a));
+    tegels[i].userData.dir = dir;
+    tegels[i].position.set(p.x + dir.x * INST.afstandTegel, 0.01, p.z + dir.y * INST.afstandTegel);
+    tegels[i].rotation.y = yaw; tegels[i].visible = true;
+  });
+
+  hud.position.set(p.x + vooruit.x * 1.6, Math.max(p.y - 0.15, 0.9), p.z + vooruit.y * 1.6);
+  hud.lookAt(p.x, hud.position.y, p.z); hud.visible = true;
+  stip.visible = true;
+
+  naarMidden();
+  timer = -INST.pauzeNaPlaatsen;
+  geplaatst = true; opnieuwPlaatsen = false;
+}
+
+function kleurAlles() {
+  tegels.forEach((t, i) => t.material = (i === doel && toestand === 'naarDoel') ? MAT.doel : MAT.rust);
+  midden.material = toestand === 'naarMidden' ? MAT.midden : MAT.rust;
+}
+function naarMidden() { toestand = 'naarMidden'; timer = 0; kleurAlles(); }
+function nieuwDoel(t) {
+  let n; do { n = Math.floor(Math.random() * tegels.length); } while (n === doel && tegels.length > 1);
+  doel = n; toestand = 'naarDoel'; timer = 0; startTijd = t; kleurAlles(); toon(660);
+}
+function geraakt(t) {
+  score++; tijden.push((t - startTijd) / 1000);
+  toon(880, 0.12); toon(1320, 0.18, 0.1);
+  const geraakteTegel = tegels[doel];
+  naarMidden();
+  geraakteTegel.material = MAT.goed;
+}
+
+function update(p, dt) {
+  stip.position.set(p.x, 0.012, p.z);
+  const off = new THREE.Vector2(p.x - oorsprong.x, p.z - oorsprong.y);
+
+  if (toestand === 'naarMidden') {
+    if (off.length() < INST.drempelMidden) { timer += dt; if (timer >= INST.wachttijd) nieuwDoel(performance.now()); }
+    else if (timer > 0) timer = 0;
+  } else {
+    const d = tegels[doel].userData.dir;
+    const voor = off.dot(d);
+    const zij = Math.abs(off.x * d.y - off.y * d.x);
+    if (voor >= INST.drempelVooruit && zij <= INST.drempelZij) { timer += dt; if (timer >= INST.wachttijd) geraakt(performance.now()); }
+    else timer = 0;
+  }
+
+  hudKlok += dt;
+  if (hudKlok > 0.2) {
+    hudKlok = 0;
+    if (toestand === 'naarDoel') tekenHUD('Stap naar de blauwe tegel', '#5aaaff', p.y);
+    else tekenHUD(timer < 0 ? 'Klaar voor de start…' : 'Terug naar het midden', '#ffffff', p.y);
+  }
+}
+
+renderer.setAnimationLoop((t, frame) => {
+  if (frame) {
+    const pose = frame.getViewerPose(renderer.xr.getReferenceSpace());
+    if (pose) {
+      const dt = vorigeT === null ? 0 : Math.min((t - vorigeT) / 1000, 0.1);
+      vorigeT = t;
+      const p = pose.transform.position, o = pose.transform.orientation;
+      if (!geplaatst || opnieuwPlaatsen) plaats(p, o);
+      update(p, dt);
+    }
+  }
+  renderer.render(scene, camera);
+});
+
+// ---------- Startknop ----------
+const knop = document.getElementById('start');
+const status = document.getElementById('status');
+
+function nietBeschikbaar(tekst) { knop.textContent = 'Niet beschikbaar'; knop.disabled = true; status.textContent = tekst; }
+
+if (!('xr' in navigator)) {
+  nietBeschikbaar('Deze browser ondersteunt geen WebXR. Open deze pagina in de browser van de Meta Quest.');
+} else {
+  navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+    if (ok) { knop.disabled = false; knop.textContent = 'Start'; }
+    else nietBeschikbaar('Mixed reality wordt hier niet ondersteund. Open deze pagina in de browser van de Meta Quest.');
+  }).catch(() => nietBeschikbaar('WebXR-controle mislukt.'));
+}
+
+knop.addEventListener('click', async () => {
+  try {
+    if (!audio) audio = new AudioContext();
+    const sessie = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['local-floor'],
+      optionalFeatures: ['hand-tracking']
+    });
+    sessie.addEventListener('select', () => { opnieuwPlaatsen = true; });
+    sessie.addEventListener('end', () => {
+      geplaatst = false; vorigeT = null;
+      [midden, ...tegels, hud, stip].forEach(m => m.visible = false);
+      const gem = tijden.length ? (tijden.reduce((a, b) => a + b, 0) / tijden.length).toFixed(2) : '–';
+      status.textContent = `Vorige ronde: ${score} stappen, gemiddeld ${gem} s per stap.`;
+      knop.textContent = 'Opnieuw starten';
+      score = 0; tijden = []; doel = -1;
+    });
+    await renderer.xr.setSession(sessie);
+    status.textContent = '';
+  } catch (e) {
+    status.textContent = 'Starten mislukt: ' + e.message;
+  }
+});
+</script>
+</body>
+</html>
