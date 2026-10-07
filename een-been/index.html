@@ -21,6 +21,10 @@
   td,th{padding:4px 10px;border-bottom:1px solid #2a3340}
   th{color:#9aa5b4;font-weight:600}
   #versie{margin-top:1.4rem;font-size:.8rem;color:#6b7480}
+  .persoonlijk{background:#1c232d;border-radius:14px;padding:12px 14px;margin:0 0 1rem;text-align:left}
+  .persoonlijk label{font-weight:600;cursor:pointer}
+  #basisInfo{color:#9aa5b4;font-size:.92rem;margin-top:4px}
+  .klein{font-size:.9rem;padding:.4rem .9rem;border:0;border-radius:10px;background:#2a3340;color:#eef2f7;margin-top:.5rem;cursor:pointer}
 </style>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
@@ -33,10 +37,15 @@
      De tijd loopt alleen als je stil genoeg staat. Eerst til je je linkervoet op, daarna je rechtervoet.</p>
   <p>Zoek een plek naast een stoel of tafel om je aan vast te houden als het nodig is.</p>
   <div class="niveaus" id="niveaus"></div>
+  <div class="persoonlijk">
+    <label><input type="checkbox" id="persoonlijk" checked> Persoonlijke cirkel</label>
+    <div id="basisInfo"></div>
+    <button id="herMeten" class="klein">Opnieuw meten</button>
+  </div>
   <button id="start" disabled>Even geduld…</button>
   <div id="status"></div>
   <div id="resultaten"></div>
-  <div id="versie">versie 0.3</div>
+  <div id="versie">versie 0.4</div>
 </div>
 
 <script type="module">
@@ -57,6 +66,27 @@ const KIJK_TIJD = 0.4;                  // seconden blijven kijken
 const TIK_AFSTAND = 0.09;               // meter: zo dicht moet je vingertop bij een bal komen
 const EXTRA_PAUZE = 1.0;                // seconden rust voordat het volgende lampje/bal verschijnt
 const MIN_AFSTAND_HAND = 0.25;          // meter: nieuwe bal verschijnt minstens zo ver van je handen
+
+// ---------- Persoonlijke cirkel ----------
+// Eerst 10 s zo stil mogelijk op één been staan. De 'basis' is de afstand waarbinnen je 90% van de tijd bleef.
+// Cirkel per niveau = factor x basis (begrensd tussen 5 en 25 cm).
+const METEN_DUUR = 10;
+const CIRKEL_FACTOR = { 1: 2.0, 2: 1.3, 3: 1.6, 4: 2.2 };
+const CIRKEL_MIN = 0.05, CIRKEL_MAX = 0.25, BASIS_MIN = 0.025;
+function straalVoor(n, basisM) { return Math.min(CIRKEL_MAX, Math.max(CIRKEL_MIN, CIRKEL_FACTOR[n] * basisM)); }
+let basis = null, moetMeten = false;
+try { basis = JSON.parse(localStorage.getItem('flamingo_basis')); } catch (e) { basis = null; }
+const persoonlijkEl = document.getElementById('persoonlijk');
+const basisInfo = document.getElementById('basisInfo');
+function toonBasis() {
+  if (!persoonlijkEl.checked) basisInfo.textContent = 'Uit: vaste cirkels per niveau.';
+  else if (moetMeten || !basis) basisInfo.textContent = 'Bij de start meten we eerst 10 s jouw balans.';
+  else basisInfo.textContent = `Jouw basis: ${(basis.m * 100).toFixed(1)} cm (gemeten ${basis.datum}). Cirkels: ` +
+    [1, 2, 3, 4].map(n => `${n}: ${Math.round(straalVoor(n, basis.m) * 100)} cm`).join(' · ');
+}
+persoonlijkEl.addEventListener('change', toonBasis);
+document.getElementById('herMeten').addEventListener('click', () => { moetMeten = true; persoonlijkEl.checked = true; toonBasis(); });
+toonBasis();
 
 // ---------- Niveaukeuze op de pagina ----------
 let niveau = 1;
@@ -151,6 +181,7 @@ let geplaatst = false, knijp = false, vorigeT = null, hudKlok = 0;
 let fase = 'uitleg', faseTijd = 0, ronde = 0;
 let midden = new THREE.Vector2(), basisY = 1.6, vooruit = new THREE.Vector2(0, -1);
 let instelX = 0, instelZ = 0, instelN = 0;
+let metingBezig = false, meetAfst = [];
 let tijdInBalans = 0, wiebels = 0, binnen = true, zwaaiSom = 0, zwaaiTijd = 0;
 let extraTeller = 0, doelPos = new THREE.Vector3(), kijkTimer = 0, laatsteKant = 1, extraPauze = 0;
 let resultaten = [];
@@ -169,8 +200,8 @@ function plaats(p, q) {
   hud.position.set(p.x + vooruit.x * 1.6, Math.max(p.y + 0.05, 1.0), p.z + vooruit.y * 1.6);
   hud.lookAt(p.x, hud.position.y, p.z);
   hud.visible = true; stip.visible = true;
-  bouwCirkel(N.straal); cirkel.position.set(p.x, 0.01, p.z); cirkel.visible = true; cirkelKleur(0xffffff);
-  fase = 'uitleg'; faseTijd = 0; ronde = 0; resultaten = [];
+  bouwCirkel(N.straal); cirkel.position.set(p.x, 0.01, p.z); cirkel.visible = !metingBezig; cirkelKleur(0xffffff);
+  fase = metingBezig ? 'meetUitleg' : 'uitleg'; faseTijd = 0; ronde = 0; resultaten = [];
   geplaatst = true;
 }
 
@@ -217,7 +248,7 @@ function update(p, q, frame, ref, dt) {
   const afstand = Math.hypot(p.x - midden.x, p.z - midden.y);
   const geknepen = knijp; knijp = false;
 
-  if (fase === 'uitleg') {
+  if (fase === 'uitleg' || fase === 'meetUitleg' || fase === 'meetKlaar') {
     if (geknepen) { fase = 'aftellen'; faseTijd = 0; geluid.tik(); }
   }
   else if (fase === 'aftellen') {
@@ -230,13 +261,27 @@ function update(p, q, frame, ref, dt) {
     // midden = gemiddelde positie tijdens de eerste seconde op één been
     instelX += p.x; instelZ += p.z; instelN++;
     midden.set(instelX / instelN, instelZ / instelN); cirkel.position.set(midden.x, 0.01, midden.y);
-    if (faseTijd >= INSTELTIJD) {
+    if (faseTijd >= INSTELTIJD && metingBezig) {
+      fase = 'meten'; faseTijd = 0; meetAfst = []; geluid.start();
+    } else if (faseTijd >= INSTELTIJD) {
       fase = 'balans'; faseTijd = 0; tijdInBalans = 0; wiebels = 0; binnen = true;
       zwaaiSom = 0; zwaaiTijd = 0; extraTeller = 0; extraPauze = 0; basisY = p.y;
       const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
       if (Math.hypot(f.x, f.z) > 0.1) vooruit.set(f.x, f.z).normalize();
       geluid.start();
       if (N.extra) nieuwDoel();
+    }
+  }
+  else if (fase === 'meten') {
+    meetAfst.push(afstand);
+    if (faseTijd >= METEN_DUUR) {
+      const gesorteerd = [...meetAfst].sort((a, b) => a - b);
+      const p90 = gesorteerd[Math.floor(gesorteerd.length * 0.9)] || BASIS_MIN;
+      basis = { m: Math.max(p90, BASIS_MIN), datum: new Date().toISOString().slice(0, 10) };
+      try { localStorage.setItem('flamingo_basis', JSON.stringify(basis)); } catch (e) {}
+      moetMeten = false; metingBezig = false; toonBasis();
+      N.straal = straalVoor(niveau, basis.m); bouwCirkel(N.straal); cirkel.visible = true; cirkelKleur(0xffffff);
+      fase = 'meetKlaar'; faseTijd = 0; geluid.klaar();
     }
   }
   else if (fase === 'balans') {
@@ -267,7 +312,7 @@ function update(p, q, frame, ref, dt) {
 
     if (tijdInBalans >= N.duur) {
       const sterren = wiebels === 0 ? 3 : wiebels <= 2 ? 2 : 1;
-      resultaten.push({ voet: voet(), tijd: faseTijd, wiebels, zwaai: zwaaiSom / zwaaiTijd * 100, extra: extraTeller, sterren });
+      resultaten.push({ voet: voet(), straal: N.straal, tijd: faseTijd, wiebels, zwaai: zwaaiSom / zwaaiTijd * 100, extra: extraTeller, sterren });
       doelBol.visible = false; cirkelKleur(0xffffff); geluid.klaar();
       fase = ronde < RONDES.length - 1 ? 'rust' : 'einde'; faseTijd = 0;
       toonResultaten();
@@ -286,8 +331,14 @@ function update(p, q, frame, ref, dt) {
   hudKlok = 0;
   const extraTekst = N.extra === 'kijken' ? `lampjes: ${extraTeller}` : N.extra === 'reiken' ? `ballen: ${extraTeller}` : '';
   const sterTekst = r => '★'.repeat(r.sterren) + '☆'.repeat(3 - r.sterren);
-  if (fase === 'uitleg') {
-    tekenHUD(`Niveau ${niveau}: ${N.naam}`, '#ff7eb6', '', `Til straks je ${voet()}voet op`, 'Knijp duim en wijsvinger om te beginnen');
+  if (fase === 'meetUitleg') {
+    tekenHUD('Eerst meten we jouw balans', '#ff7eb6', '', 'Til je linkervoet op, sta 10 s zo stil mogelijk', 'Knijp duim en wijsvinger om te beginnen');
+  } else if (fase === 'meten') {
+    tekenHUD('Sta zo stil mogelijk', '#ffd23f', Math.max(0, METEN_DUUR - faseTijd).toFixed(0), 'We meten jouw balans', '', Math.min(1, faseTijd / METEN_DUUR));
+  } else if (fase === 'meetKlaar') {
+    tekenHUD('Meting klaar! Zet je voet neer', '#5ee08a', `${Math.round(N.straal * 100)} cm`, `jouw cirkel voor niveau ${niveau}`, 'Knijp als je klaar bent om te spelen');
+  } else if (fase === 'uitleg') {
+    tekenHUD(`Niveau ${niveau}: ${N.naam}`, '#ff7eb6', '', `Til straks je ${voet()}voet op · cirkel ${Math.round(N.straal * 100)} cm`, 'Knijp duim en wijsvinger om te beginnen');
   } else if (fase === 'aftellen') {
     tekenHUD(`Til je ${voet().toUpperCase()}voet op`, '#ffd23f', String(Math.max(1, Math.ceil(AFTELTIJD - faseTijd))), 'Kijk recht vooruit', '');
   } else if (fase === 'instellen') {
@@ -307,8 +358,8 @@ function update(p, q, frame, ref, dt) {
 function toonResultaten() {
   const el = document.getElementById('resultaten');
   if (!resultaten.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<table><tr><th>Voet op</th><th>Sterren</th><th>Totale tijd</th><th>Wiebels</th><th>Gem. zwaai</th>${N.extra ? '<th>Extra</th>' : ''}</tr>` +
-    resultaten.map(r => `<tr><td>${r.voet}</td><td>${'★'.repeat(r.sterren)}</td><td>${r.tijd.toFixed(1)} s</td><td>${r.wiebels}</td><td>${r.zwaai.toFixed(1)} cm</td>${N.extra ? `<td>${r.extra}</td>` : ''}</tr>`).join('') +
+  el.innerHTML = `<table><tr><th>Voet op</th><th>Cirkel</th><th>Sterren</th><th>Totale tijd</th><th>Wiebels</th><th>Gem. zwaai</th>${N.extra ? '<th>Extra</th>' : ''}</tr>` +
+    resultaten.map(r => `<tr><td>${r.voet}</td><td>${Math.round(r.straal * 100)} cm</td><td>${'★'.repeat(r.sterren)}</td><td>${r.tijd.toFixed(1)} s</td><td>${r.wiebels}</td><td>${r.zwaai.toFixed(1)} cm</td>${N.extra ? `<td>${r.extra}</td>` : ''}</tr>`).join('') +
     '</table>';
 }
 
@@ -342,7 +393,9 @@ else navigator.xr.isSessionSupported('immersive-ar').then(ok => {
 knop.addEventListener('click', async () => {
   try {
     if (!audio) audio = new AudioContext();
-    N = NIVEAUS[niveau];
+    N = { ...NIVEAUS[niveau] };
+    metingBezig = persoonlijkEl.checked && (moetMeten || !basis);
+    if (persoonlijkEl.checked && !metingBezig) N.straal = straalVoor(niveau, basis.m);
     const sessie = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking']
     });
