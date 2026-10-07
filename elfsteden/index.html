@@ -284,7 +284,7 @@ function tekenKaart(g, w, h, stad, gestempeld) {
 function maakStempelpost(kant, reik, stad) {
   const lengte = base.y / 0.936, sx = kant * reik * lengte, H = D.reikHoogte * lengte;
   const g = new THREE.Group(), hout = new THREE.MeshLambertMaterial({ color: 0x7a4a24 });
-  const px = sx + kant * 0.12;   // paal net achter de kaart, zodat hij niet in de weg zit
+  const px = sx + kant * 0.21;   // paal net achter de kaart, zodat hij niet in de weg zit
   const paal = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, H + 0.85, 8), hout); paal.position.set(px, (H + 0.85) / 2, 0.05); g.add(paal);
   const voet = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.05, 16), hout); voet.position.set(px, 0.025, 0.05); g.add(voet);
   // kaart als lessenaar, schuin naar jou toe gedraaid
