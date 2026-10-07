@@ -593,7 +593,7 @@ function update(p, q, frame, ref, dt) {
               if (a >= 0.45 && !opdr.gestempeld) { opdr.gestempeld = true; zetKaart(opdr.stad, true); geluid.bonk(); }
               if (a > 1.3) gelukt();
             }
-          } else if (opdr.id === 'wind') {          } else if (opdr.id === 'wind') {
+          } else if (opdr.id === 'wind') {
             if (ot > 1.5) {
               opdr.hold = handen === 0 ? opdr.hold + dt : 0;
               if (opdr.hold > 0) { if (opdr.reactie === undefined) opdr.reactie = ot; zetWolk('Goed zo, even vasthouden…', '#43BFFD'); }
