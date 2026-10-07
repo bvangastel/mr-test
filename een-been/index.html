@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flamingo – op één been</title>
+<style>
+  body{margin:0;font-family:system-ui,sans-serif;background:#10141a;color:#eef2f7;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:16px;box-sizing:border-box}
+  .kaart{max-width:600px;width:100%}
+  h1{font-size:2rem;margin:0 0 .4rem}
+  p{line-height:1.5;color:#c8d0dc;margin:.5rem 0}
+  .niveaus{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:1rem 0}
+  .niveau{background:#1c232d;border:2px solid #2a3340;border-radius:14px;padding:12px;color:#eef2f7;cursor:pointer;text-align:left;font-size:1rem}
+  .niveau b{display:block;font-size:1.15rem;margin-bottom:2px}
+  .niveau span{color:#9aa5b4;font-size:.9rem}
+  .niveau.gekozen{border-color:#ff7eb6;background:#2a1f2a}
+  #start{font-size:1.5rem;padding:1rem 2.4rem;border:0;border-radius:14px;background:#e0569a;color:#fff;cursor:pointer;margin-top:.4rem}
+  #start:disabled{background:#4a4f57;cursor:default}
+  #status{margin-top:1rem;color:#ffcf6b;min-height:1.4em}
+  table{margin:1rem auto 0;border-collapse:collapse;font-size:.95rem}
+  td,th{padding:4px 10px;border-bottom:1px solid #2a3340}
+  th{color:#9aa5b4;font-weight:600}
+  #versie{margin-top:1.4rem;font-size:.8rem;color:#6b7480}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="kaart">
+  <h1>🦩 Flamingo</h1>
+  <p>Sta op één been en houd de <b style="color:#ffd23f">gele stip</b> binnen de cirkel op de vloer.
+     De tijd loopt alleen als je stil genoeg staat. Eerst til je je linkervoet op, daarna je rechtervoet.</p>
+  <p>Zoek een plek naast een stoel of tafel om je aan vast te houden als het nodig is.</p>
+  <div class="niveaus" id="niveaus"></div>
+  <button id="start" disabled>Even geduld…</button>
+  <div id="status"></div>
+  <div id="resultaten"></div>
+  <div id="versie">versie 0.1</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------- Niveaus (hier kun je aan draaien) ----------
+const NIVEAUS = {
+  1: { naam: 'Instap',     uitleg: '10 s per been, ruime cirkel',            duur: 10, straal: 0.10, extra: null },
+  2: { naam: 'Gevorderd',  uitleg: '20 s per been, kleine cirkel',           duur: 20, straal: 0.07, extra: null },
+  3: { naam: 'Rondkijken', uitleg: '20 s, kijk naar lampjes links en rechts', duur: 20, straal: 0.09, extra: 'kijken' },
+  4: { naam: 'Reiken',     uitleg: '20 s, tik ballen aan met je hand',       duur: 20, straal: 0.12, extra: 'reiken' }
+};
+const RONDES = ['linker', 'rechter'];   // welke voet je optilt
+const AFTELTIJD = 3;                    // seconden aftellen
+const KIJK_HOEK = 10;                   // graden: zo precies moet je naar een lampje kijken
+const KIJK_TIJD = 0.4;                  // seconden blijven kijken
+const TIK_AFSTAND = 0.09;               // meter: zo dicht moet je hand bij een bal komen
+
+// ---------- Niveaukeuze op de pagina ----------
+let niveau = 1;
+const niveausEl = document.getElementById('niveaus');
+Object.entries(NIVEAUS).forEach(([n, d]) => {
+  const b = document.createElement('button');
+  b.className = 'niveau' + (n == niveau ? ' gekozen' : '');
+  b.innerHTML = `<b>${n}. ${d.naam}</b><span>${d.uitleg}</span>`;
+  b.onclick = () => { niveau = +n; [...niveausEl.children].forEach(c => c.classList.remove('gekozen')); b.classList.add('gekozen'); };
+  niveausEl.appendChild(b);
+});
+
+// ---------- three.js + WebXR ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.domElement.style.display = 'none';
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, 1, 0.01, 50);
+
+// cirkel op de vloer
+const cirkel = new THREE.Group(); scene.add(cirkel); cirkel.visible = false;
+const cirkelRandMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false });
+const cirkelVulMat  = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, depthWrite: false });
+let cirkelRand, cirkelVul;
+function bouwCirkel(straal) {
+  cirkel.clear();
+  cirkelRand = new THREE.Mesh(new THREE.RingGeometry(straal - 0.012, straal, 64).rotateX(-Math.PI / 2), cirkelRandMat);
+  cirkelVul  = new THREE.Mesh(new THREE.CircleGeometry(straal - 0.012, 64).rotateX(-Math.PI / 2), cirkelVulMat);
+  cirkel.add(cirkelVul, cirkelRand);
+}
+function cirkelKleur(hex) { cirkelRandMat.color.setHex(hex); cirkelVulMat.color.setHex(hex); }
+
+// gele stip onder je hoofd
+const stip = new THREE.Mesh(new THREE.CircleGeometry(0.025, 32).rotateX(-Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0xffd23f, depthWrite: false }));
+stip.visible = false; scene.add(stip);
+
+// doel voor extra opdrachten (lampje of bal)
+const doelBol = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 16),
+  new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9 }));
+doelBol.visible = false; scene.add(doelBol);
+
+// scorebord
+const hudCanvas = document.createElement('canvas'); hudCanvas.width = 1024; hudCanvas.height = 600;
+const hudCtx = hudCanvas.getContext('2d');
+const hudTex = new THREE.CanvasTexture(hudCanvas); hudTex.colorSpace = THREE.SRGBColorSpace;
+const hud = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.387),
+  new THREE.MeshBasicMaterial({ map: hudTex, transparent: true, depthWrite: false }));
+hud.visible = false; scene.add(hud);
+
+function tekenHUD(titel, kleur, groot, regel1 = '', regel2 = '', balk = null) {
+  const g = hudCtx;
+  g.clearRect(0, 0, 1024, 600);
+  g.fillStyle = 'rgba(15,20,28,0.78)'; g.beginPath(); g.roundRect(8, 8, 1008, 584, 40); g.fill();
+  g.textAlign = 'center';
+  g.fillStyle = kleur; g.font = 'bold 70px system-ui, sans-serif'; g.fillText(titel, 512, 110);
+  if (groot !== '') { g.fillStyle = '#ffffff'; g.font = 'bold 150px system-ui, sans-serif'; g.fillText(groot, 512, 285); }
+  if (balk !== null) {
+    g.fillStyle = '#2a3340'; g.beginPath(); g.roundRect(112, 320, 800, 36, 18); g.fill();
+    g.fillStyle = '#5ee08a'; g.beginPath(); g.roundRect(112, 320, Math.max(36, 800 * balk), 36, 18); g.fill();
+  }
+  g.fillStyle = '#c8d0dc'; g.font = '46px system-ui, sans-serif'; g.fillText(regel1, 512, 440);
+  g.fillStyle = '#9aa5b4'; g.font = '40px system-ui, sans-serif'; g.fillText(regel2, 512, 520);
+  hudTex.needsUpdate = true;
+}
+
+// ---------- Geluid ----------
+let audio = null;
+function toon(freq, duur = 0.15, vertraging = 0, vol = 0.25) {
+  if (!audio) return;
+  const t0 = audio.currentTime + vertraging;
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t0); g.gain.exponentialRampToValueAtTime(0.001, t0 + duur);
+  o.connect(g).connect(audio.destination); o.start(t0); o.stop(t0 + duur);
+}
+const geluid = {
+  tik: () => toon(660, 0.1),
+  start: () => { toon(880, 0.12); toon(1175, 0.2, 0.1); },
+  wiebel: () => toon(220, 0.2, 0, 0.2),
+  pak: () => toon(1320, 0.1),
+  klaar: () => { toon(784, 0.15); toon(988, 0.15, 0.12); toon(1319, 0.3, 0.24); }
+};
+
+// ---------- Spelstatus ----------
+let geplaatst = false, knijp = false, vorigeT = null, hudKlok = 0;
+let fase = 'uitleg', faseTijd = 0, ronde = 0;
+let midden = new THREE.Vector2(), basisY = 1.6, vooruit = new THREE.Vector2(0, -1);
+let tijdInBalans = 0, wiebels = 0, binnen = true, zwaaiSom = 0, zwaaiTijd = 0;
+let extraTeller = 0, doelPos = new THREE.Vector3(), kijkTimer = 0, laatsteKant = 1;
+let resultaten = [];
+let N = NIVEAUS[1];
+
+function richting(graden) {
+  const a = THREE.MathUtils.degToRad(graden);
+  const links = new THREE.Vector2(vooruit.y, -vooruit.x);
+  return new THREE.Vector2(vooruit.x * Math.cos(a) + links.x * Math.sin(a), vooruit.y * Math.cos(a) + links.y * Math.sin(a));
+}
+
+function plaats(p, q) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+  vooruit.set(f.x, f.z); if (vooruit.lengthSq() < 1e-4) vooruit.set(0, -1); vooruit.normalize();
+  midden.set(p.x, p.z); basisY = p.y;
+  hud.position.set(p.x + vooruit.x * 1.6, Math.max(p.y + 0.05, 1.0), p.z + vooruit.y * 1.6);
+  hud.lookAt(p.x, hud.position.y, p.z);
+  hud.visible = true; stip.visible = true;
+  bouwCirkel(N.straal); cirkel.position.set(p.x, 0.01, p.z); cirkel.visible = true; cirkelKleur(0xffffff);
+  fase = 'uitleg'; faseTijd = 0; ronde = 0; resultaten = [];
+  geplaatst = true;
+}
+
+function nieuwDoel() {
+  laatsteKant = -laatsteKant;
+  if (N.extra === 'kijken') {
+    const d = richting(laatsteKant * (25 + Math.random() * 20));
+    doelPos.set(midden.x + d.x * 1.3, basisY + (Math.random() * 0.3 - 0.15), midden.y + d.y * 1.3);
+    doelBol.scale.setScalar(0.06); doelBol.material.color.setHex(0xffd23f);
+  } else {
+    const d = richting(laatsteKant * (15 + Math.random() * 30));
+    doelPos.set(midden.x + d.x * 0.45, basisY - (0.35 + Math.random() * 0.3), midden.y + d.y * 0.45);
+    doelBol.scale.setScalar(0.05); doelBol.material.color.setHex(0xff7eb6);
+  }
+  doelBol.position.copy(doelPos); doelBol.visible = true; kijkTimer = 0;
+}
+
+function handPunten(frame, ref) {
+  const punten = [];
+  for (const bron of frame.session.inputSources) {
+    if (bron.hand) {
+      for (const naam of ['index-finger-tip', 'middle-finger-tip', 'wrist']) {
+        const gewricht = bron.hand.get(naam);
+        const pose = gewricht && frame.getJointPose(gewricht, ref);
+        if (pose) punten.push(pose.transform.position);
+      }
+    } else if (bron.gripSpace) {
+      const pose = frame.getPose(bron.gripSpace, ref);
+      if (pose) punten.push(pose.transform.position);
+    }
+  }
+  return punten;
+}
+
+function voet() { return RONDES[ronde]; }
+
+function update(p, q, frame, ref, dt) {
+  faseTijd += dt;
+  stip.position.set(p.x, 0.012, p.z);
+  const afstand = Math.hypot(p.x - midden.x, p.z - midden.y);
+  const geknepen = knijp; knijp = false;
+
+  if (fase === 'uitleg') {
+    if (geknepen) { fase = 'aftellen'; faseTijd = 0; geluid.tik(); }
+  }
+  else if (fase === 'aftellen') {
+    midden.set(p.x, p.z); cirkel.position.set(p.x, 0.01, p.z); // cirkel volgt je tot de start
+    const rest = AFTELTIJD - faseTijd;
+    if (Math.ceil(rest) !== Math.ceil(rest + dt) && rest > 0) geluid.tik();
+    if (rest <= 0) {
+      fase = 'balans'; faseTijd = 0; tijdInBalans = 0; wiebels = 0; binnen = true;
+      zwaaiSom = 0; zwaaiTijd = 0; extraTeller = 0; basisY = p.y;
+      const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+      if (Math.hypot(f.x, f.z) > 0.1) vooruit.set(f.x, f.z).normalize();
+      geluid.start();
+      if (N.extra) nieuwDoel();
+    }
+  }
+  else if (fase === 'balans') {
+    const nuBinnen = afstand <= N.straal;
+    if (binnen && !nuBinnen) { wiebels++; geluid.wiebel(); }
+    binnen = nuBinnen;
+    cirkelKleur(binnen ? 0x5ee08a : 0xff5a5a);
+    zwaaiSom += afstand * dt; zwaaiTijd += dt;
+    if (binnen) tijdInBalans += dt;
+
+    if (N.extra === 'kijken') {
+      const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+      const naarDoel = doelPos.clone().sub(new THREE.Vector3(p.x, p.y, p.z)).normalize();
+      const hoek = THREE.MathUtils.radToDeg(f.angleTo(naarDoel));
+      if (hoek < KIJK_HOEK) {
+        kijkTimer += dt; doelBol.material.color.setHex(0x5ee08a);
+        if (kijkTimer >= KIJK_TIJD) { extraTeller++; geluid.pak(); nieuwDoel(); }
+      } else { kijkTimer = 0; doelBol.material.color.setHex(0xffd23f); }
+    } else if (N.extra === 'reiken') {
+      if (handPunten(frame, ref).some(h => Math.hypot(h.x - doelPos.x, h.y - doelPos.y, h.z - doelPos.z) < TIK_AFSTAND)) {
+        extraTeller++; geluid.pak(); nieuwDoel();
+      }
+    }
+
+    if (tijdInBalans >= N.duur) {
+      const sterren = wiebels === 0 ? 3 : wiebels <= 2 ? 2 : 1;
+      resultaten.push({ voet: voet(), tijd: faseTijd, wiebels, zwaai: zwaaiSom / zwaaiTijd * 100, extra: extraTeller, sterren });
+      doelBol.visible = false; cirkelKleur(0xffffff); geluid.klaar();
+      fase = ronde < RONDES.length - 1 ? 'rust' : 'einde'; faseTijd = 0;
+      toonResultaten();
+    }
+  }
+  else if (fase === 'rust') {
+    if (geknepen) { ronde++; fase = 'aftellen'; faseTijd = 0; geluid.tik(); }
+  }
+  else if (fase === 'einde') {
+    if (geknepen) { ronde = 0; resultaten = []; fase = 'aftellen'; faseTijd = 0; geluid.tik(); }
+  }
+
+  // scorebord bijwerken
+  hudKlok += dt;
+  if (hudKlok < 0.1) return;
+  hudKlok = 0;
+  const extraTekst = N.extra === 'kijken' ? `lampjes: ${extraTeller}` : N.extra === 'reiken' ? `ballen: ${extraTeller}` : '';
+  const sterTekst = r => '★'.repeat(r.sterren) + '☆'.repeat(3 - r.sterren);
+  if (fase === 'uitleg') {
+    tekenHUD(`Niveau ${niveau}: ${N.naam}`, '#ff7eb6', '', `Til straks je ${voet()}voet op`, 'Knijp duim en wijsvinger om te beginnen');
+  } else if (fase === 'aftellen') {
+    tekenHUD(`Til je ${voet().toUpperCase()}voet op`, '#ffd23f', String(Math.max(1, Math.ceil(AFTELTIJD - faseTijd))), 'Kijk recht vooruit', '');
+  } else if (fase === 'balans') {
+    tekenHUD(binnen ? 'Mooi stil blijven staan' : 'Terug naar het midden!', binnen ? '#5ee08a' : '#ff5a5a',
+      Math.max(0, N.duur - tijdInBalans).toFixed(0), `wiebels: ${wiebels}${extraTekst ? '   ·   ' + extraTekst : ''}`,
+      N.extra === 'kijken' ? 'Kijk naar het lampje' : N.extra === 'reiken' ? 'Tik de roze bal aan' : '', tijdInBalans / N.duur);
+  } else if (fase === 'rust') {
+    const r = resultaten[resultaten.length - 1];
+    tekenHUD('Goed gedaan! Zet je voet neer', '#5ee08a', sterTekst(r), `Volgende: ${RONDES[ronde + 1]}voet optillen`, 'Knijp als je klaar bent');
+  } else if (fase === 'einde') {
+    tekenHUD('Klaar!', '#5ee08a', resultaten.map(sterTekst).join('  '), resultaten.map(r => `${r.voet}: ${r.wiebels} wiebels`).join('   ·   '), 'Knijp om opnieuw te spelen');
+  }
+}
+
+function toonResultaten() {
+  const el = document.getElementById('resultaten');
+  if (!resultaten.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<table><tr><th>Voet op</th><th>Sterren</th><th>Totale tijd</th><th>Wiebels</th><th>Gem. zwaai</th>${N.extra ? '<th>Extra</th>' : ''}</tr>` +
+    resultaten.map(r => `<tr><td>${r.voet}</td><td>${'★'.repeat(r.sterren)}</td><td>${r.tijd.toFixed(1)} s</td><td>${r.wiebels}</td><td>${r.zwaai.toFixed(1)} cm</td>${N.extra ? `<td>${r.extra}</td>` : ''}</tr>`).join('') +
+    '</table>';
+}
+
+renderer.setAnimationLoop((t, frame) => {
+  if (frame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = frame.getViewerPose(ref);
+    if (pose) {
+      const dt = vorigeT === null ? 0 : Math.min((t - vorigeT) / 1000, 0.1);
+      vorigeT = t;
+      const p = pose.transform.position, o = pose.transform.orientation;
+      const q = new THREE.Quaternion(o.x, o.y, o.z, o.w);
+      if (!geplaatst) plaats(p, q);
+      update(p, q, frame, ref, dt);
+    }
+  }
+  renderer.render(scene, camera);
+});
+
+// ---------- Startknop ----------
+const knop = document.getElementById('start');
+const status = document.getElementById('status');
+function nietBeschikbaar(tekst) { knop.textContent = 'Niet beschikbaar'; knop.disabled = true; status.textContent = tekst; }
+
+if (!('xr' in navigator)) nietBeschikbaar('Deze browser ondersteunt geen WebXR. Open deze pagina in de browser van de Meta Quest.');
+else navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+  if (ok) { knop.disabled = false; knop.textContent = 'Start'; }
+  else nietBeschikbaar('Mixed reality wordt hier niet ondersteund. Open deze pagina in de browser van de Meta Quest.');
+}).catch(() => nietBeschikbaar('WebXR-controle mislukt.'));
+
+knop.addEventListener('click', async () => {
+  try {
+    if (!audio) audio = new AudioContext();
+    N = NIVEAUS[niveau];
+    const sessie = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking']
+    });
+    sessie.addEventListener('select', () => { knijp = true; });
+    sessie.addEventListener('end', () => {
+      geplaatst = false; vorigeT = null;
+      [cirkel, stip, hud, doelBol].forEach(m => m.visible = false);
+      status.textContent = resultaten.length ? `Resultaten niveau ${niveau}: ${N.naam}` : '';
+      knop.textContent = 'Opnieuw starten';
+    });
+    await renderer.xr.setSession(sessie);
+    status.textContent = ''; toonResultaten();
+  } catch (e) {
+    status.textContent = 'Starten mislukt: ' + e.message;
+  }
+});
+</script>
+</body>
+</html>
