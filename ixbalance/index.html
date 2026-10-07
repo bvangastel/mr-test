@@ -55,19 +55,20 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.1</div>
+  <div id="versie">versie 0.2</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.1';
+const VERSIE = '0.2';
 
 // ---------- Instellingen (in meters en seconden) ----------
 const D = {
   gewicht: 0.05,        // hoofd zo ver opzij = gewicht verplaatst
   gewichtMax: 0.15,     // verder dan dit is geen gewichtsverplaatsing meer maar een stap
   slag: 0.04,           // schaatsslag: voorbij deze afstand links/rechts
-  stapZij: 0.18, stapVoor: 0.18, stapAchter: 0.14,
+  stapZij: 0.22, stapVoor: 0.20, stapAchter: 0.16,   // stap telt zodra je hoofd hier voorbij komt
+  stapUitTijd: 0.15,    // zo lang voorbij de drempel (stilstaan is niet nodig)
   terug: 0.08,          // binnen deze afstand van de startplek = terug
   stilSnelheid: 0.12,   // m/s: langzamer = stilstaan
   stilTijd: 0.3,
@@ -305,7 +306,8 @@ function controleer(P, lat, fwd, daal, handen, dt) {
       const m = { links: -lat, rechts: lat, voor: fwd, achter: -fwd }[P.richting];
       const drempel = { links: D.stapZij, rechts: D.stapZij, voor: D.stapVoor, achter: D.stapAchter }[P.richting];
       sub.max = Math.max(sub.max, m);
-      if (sub.stap === 0 && m > drempel && sub.stilT > D.stilTijd) { sub.stap = 1; geluid.half(); doelRing.material.color.set(K.groen); gebeurtenis('stap-uit', { m: +m.toFixed(3) }); }
+      sub.uitT = m > drempel ? (sub.uitT || 0) + dt : 0;
+      if (sub.stap === 0 && sub.uitT >= D.stapUitTijd) { sub.stap = 1; geluid.half(); doelRing.material.color.set(K.groen); gebeurtenis('stap-uit', { m: +m.toFixed(3) }); }
       if (sub.stap === 1 && afstand < D.terug && sub.stilT > D.stilTijd) afronden(true, `${(sub.max * 100).toFixed(0)} cm`);
       return sub.stap === 0 ? Math.min(0.5, 0.5 * Math.max(0, m) / drempel) : 0.5 + 0.5 * Math.max(0, 1 - (afstand - D.terug) / drempel);
     }
@@ -406,7 +408,7 @@ function update(p, q, frame, ref, dt) {
   else if (fase === 'terug') tekenHUD({ boven: nr, titel: P.titel, kleur: K.geel, r1: 'Ga op je startplek staan', r2: 'Op de voetjes, even stilstaan', meter: lat });
   else if (fase === 'bezig') tekenHUD({ boven: nr, titel: P.titel, kleur: K.geel,
       groot: P.soort === 'slagen' ? `${sub.n} / ${P.aantal}` : '',
-      r1: P.kort || P.zin.replace(/\.$/, ''), r2: `nog ${Math.max(0, Math.ceil(D.limiet - faseTijd))} s`,
+      r1: (P.soort === 'stap' && sub.stap === 1) ? 'Goed! Kom terug naar je voetjes' : (P.kort || P.zin.replace(/\.$/, '')), r2: `nog ${Math.max(0, Math.ceil(D.limiet - faseTijd))} s`,
       balk: P.soort === 'knop' || P.soort === 'slagen' ? null : voortgang,
       meter: (P.soort === 'gewicht' || P.soort === 'slagen') ? lat : null });
   else if (fase === 'goed') tekenHUD({ boven: nr, titel: sub.gelukt ? 'Goed zo!' : 'Volgende', kleur: sub.gelukt ? K.groen : K.rood, r1: resultaten[resultaten.length - 1]?.waarde || '', r2: '' });
@@ -449,7 +451,8 @@ downloadKnop.onclick = () => {
   const data = { app: 'iXbalance MR herkenningsproef', versie: VERSIE, datum: new Date().toISOString(), drempels: D,
     base: base && { x: base.x, y: base.y, z: base.z, vooruit: [base.vooruit.x, base.vooruit.y] },
     kolommen: ['t', 'x', 'y', 'z', 'opzij', 'vooruit', 'handen', 'fase'], frames: log, gebeurtenissen, resultaten,
-    stem: stem ? `${stem.name} (${stem.lang})` : null };
+    stem: stem ? `${stem.name} (${stem.lang})` : null,
+    stemmen: (window.speechSynthesis ? speechSynthesis.getVoices() : []).map(v => v.lang + ' ' + v.name) };
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   const d = new Date(); const pad = x => String(x).padStart(2, '0');
