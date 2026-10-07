@@ -45,7 +45,7 @@
   <button id="start" disabled>Even geduld…</button>
   <div id="status"></div>
   <div id="resultaten"></div>
-  <div id="versie">versie 0.4</div>
+  <div id="versie">versie 0.5</div>
 </div>
 
 <script type="module">
@@ -71,7 +71,7 @@ const MIN_AFSTAND_HAND = 0.25;          // meter: nieuwe bal verschijnt minstens
 // Eerst 10 s zo stil mogelijk op één been staan. De 'basis' is de afstand waarbinnen je 90% van de tijd bleef.
 // Cirkel per niveau = factor x basis (begrensd tussen 5 en 25 cm).
 const METEN_DUUR = 10;
-const CIRKEL_FACTOR = { 1: 2.0, 2: 1.3, 3: 1.6, 4: 2.2 };
+const CIRKEL_FACTOR = { 1: 2.0, 2: 1.3, 3: 1.6, 4: 3.5 };   // reiken beweegt je hoofd mee: ruimere cirkel
 const CIRKEL_MIN = 0.05, CIRKEL_MAX = 0.25, BASIS_MIN = 0.025;
 function straalVoor(n, basisM) { return Math.min(CIRKEL_MAX, Math.max(CIRKEL_MIN, CIRKEL_FACTOR[n] * basisM)); }
 let basis = null, moetMeten = false;
