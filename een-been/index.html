@@ -36,7 +36,7 @@
   <button id="start" disabled>Even geduld…</button>
   <div id="status"></div>
   <div id="resultaten"></div>
-  <div id="versie">versie 0.2</div>
+  <div id="versie">versie 0.3</div>
 </div>
 
 <script type="module">
@@ -51,6 +51,7 @@ const NIVEAUS = {
 };
 const RONDES = ['linker', 'rechter'];   // welke voet je optilt
 const AFTELTIJD = 3;                    // seconden aftellen
+const INSTELTIJD = 1.0;                 // seconden om op één been je evenwicht te vinden; daarna wordt het midden vastgezet
 const KIJK_HOEK = 10;                   // graden: zo precies moet je naar een lampje kijken
 const KIJK_TIJD = 0.4;                  // seconden blijven kijken
 const TIK_AFSTAND = 0.09;               // meter: zo dicht moet je vingertop bij een bal komen
@@ -149,6 +150,7 @@ const geluid = {
 let geplaatst = false, knijp = false, vorigeT = null, hudKlok = 0;
 let fase = 'uitleg', faseTijd = 0, ronde = 0;
 let midden = new THREE.Vector2(), basisY = 1.6, vooruit = new THREE.Vector2(0, -1);
+let instelX = 0, instelZ = 0, instelN = 0;
 let tijdInBalans = 0, wiebels = 0, binnen = true, zwaaiSom = 0, zwaaiTijd = 0;
 let extraTeller = 0, doelPos = new THREE.Vector3(), kijkTimer = 0, laatsteKant = 1, extraPauze = 0;
 let resultaten = [];
@@ -222,7 +224,13 @@ function update(p, q, frame, ref, dt) {
     midden.set(p.x, p.z); cirkel.position.set(p.x, 0.01, p.z); // cirkel volgt je tot de start
     const rest = AFTELTIJD - faseTijd;
     if (Math.ceil(rest) !== Math.ceil(rest + dt) && rest > 0) geluid.tik();
-    if (rest <= 0) {
+    if (rest <= 0) { fase = 'instellen'; faseTijd = 0; instelX = 0; instelZ = 0; instelN = 0; geluid.tik(); }
+  }
+  else if (fase === 'instellen') {
+    // midden = gemiddelde positie tijdens de eerste seconde op één been
+    instelX += p.x; instelZ += p.z; instelN++;
+    midden.set(instelX / instelN, instelZ / instelN); cirkel.position.set(midden.x, 0.01, midden.y);
+    if (faseTijd >= INSTELTIJD) {
       fase = 'balans'; faseTijd = 0; tijdInBalans = 0; wiebels = 0; binnen = true;
       zwaaiSom = 0; zwaaiTijd = 0; extraTeller = 0; extraPauze = 0; basisY = p.y;
       const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
@@ -282,6 +290,8 @@ function update(p, q, frame, ref, dt) {
     tekenHUD(`Niveau ${niveau}: ${N.naam}`, '#ff7eb6', '', `Til straks je ${voet()}voet op`, 'Knijp duim en wijsvinger om te beginnen');
   } else if (fase === 'aftellen') {
     tekenHUD(`Til je ${voet().toUpperCase()}voet op`, '#ffd23f', String(Math.max(1, Math.ceil(AFTELTIJD - faseTijd))), 'Kijk recht vooruit', '');
+  } else if (fase === 'instellen') {
+    tekenHUD('Vind je evenwicht…', '#ffd23f', '', 'Even stil blijven staan', '');
   } else if (fase === 'balans') {
     tekenHUD(binnen ? 'Mooi stil blijven staan' : 'Terug naar het midden!', binnen ? '#5ee08a' : '#ff5a5a',
       Math.max(0, N.duur - tijdInBalans).toFixed(0), `wiebels: ${wiebels}${extraTekst ? '   ·   ' + extraTekst : ''}`,
