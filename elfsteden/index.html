@@ -59,12 +59,12 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.13</div>
+  <div id="versie">versie 0.14</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.13';
+const VERSIE = '0.14';
 
 // ---------- Instellingen ----------
 const D = {
@@ -109,39 +109,42 @@ const bochtNa = (stad) => ({ id: 'bocht', naSplits: true, naam: 'Bocht na ' + st
 const stempel = (kant, stad) => ({ id: 'stempel', kant, stad, naam: `Stempel ${stad} (${kant < 0 ? 'links' : 'rechts'})`, aankondiging: `Stempelpost ${stad}! We stoppen even`, goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, we gaan verder' });
 const splits = (stad, anders, eerste) => ({ id: 'splits', stad, anders, naam: 'Splitsing ' + stad, aankondiging: eerste ? 'Een splitsing! Welke plaats komt nu?' : 'Weer een splitsing! Welke plaats komt nu?', goed: `Goed onthouden! Op naar ${stad}`, mis: 'Oei, verkeerde kant!' });
 // per etappe: nieuwe vaardigheid + herhaling; start/max = niveaugrenzen per vaardigheid (zie NIVEAU)
+// routes en dorpen volgen de officiële Elfstedenroute (passagevolgorde); 'anders' op de wegwijzer is steeds een plaats die níet op de route ligt
 const ETAPPES = [
-  { nr: 1, van: 'Leeuwarden', naar: 'Sneek', nieuw: 'schaatsen, wak en bochten', route: null,
+  { nr: 1, van: 'Leeuwarden', naar: 'Sneek', nieuw: 'schaatsen, wak en bochten', route: null, dorpen: [['Weidum', 1], ['Mantgum', 2], ['De Dille', 4], ['Dearsumerhûske', 5], ['Scharnegoutum', 7]],
     opdrachten: [wak(), bocht(-1), bocht(1), wak(), bocht(1), bocht(-1), wak(), bocht(1)],
     start: { bocht: 0, wak: 0 }, max: { bocht: 2, wak: 2 } },
-  { nr: 2, van: 'Sneek', naar: 'IJlst', nieuw: 'stempelpost (reiken)', route: null,
+  { nr: 2, van: 'Sneek', naar: 'IJlst', nieuw: 'stempelpost (reiken)', route: null, dorpen: [],
     opdrachten: [stempel(1, 'Sneek'), bocht(-1), wak(), bocht(1), wak(), stempel(-1, 'IJlst')],
     start: { bocht: 1, wak: 1, stempel: 0 }, max: { bocht: 3, wak: 3, stempel: 2 } },
-  { nr: 3, van: 'IJlst', naar: 'Sloten', nieuw: 'splitsing: route onthouden', route: ['Woudsend', 'Sloten'],
-    opdrachten: [bocht(1), splits('Woudsend', 'Heeg', true), bochtNa('Woudsend'), wak(), bocht(-1), splits('Sloten', 'Balk'), bochtNa('Sloten'), stempel(-1, 'Sloten')],
+  { nr: 3, van: 'IJlst', naar: 'Sloten', nieuw: 'splitsing: route onthouden', route: ['Woudsend', 'Sloten'], dorpen: [['Osingahuizen', 1]],
+    opdrachten: [bocht(1), splits('Woudsend', 'Heeg', true), bochtNa('Woudsend'), wak(), bocht(-1), splits('Sloten', 'Lemmer'), bochtNa('Sloten'), stempel(-1, 'Sloten')],
     start: { bocht: 1, wak: 1, stempel: 1, splits: 0 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 2 } },
-  { nr: 4, van: 'Sloten', naar: 'Stavoren', nieuw: 'bruggen (bukken)', route: null,
+  { nr: 4, van: 'Sloten', naar: 'Stavoren', nieuw: 'bruggen (bukken)', route: null, dorpen: [['Balk', 1], ['Harich', 2], ['Kolderwolde', 4], ['Galamadammen', 5], ['Warns', 6]],
     opdrachten: [brug(), bocht(-1), wak(), brug(), bocht(1), wak(), brug(), stempel(1, 'Stavoren')],
     start: { bocht: 1, wak: 1, stempel: 1, brug: 0 }, max: { bocht: 3, wak: 3, stempel: 3, brug: 2 } },
-  { nr: 5, van: 'Stavoren', naar: 'Hindeloopen', nieuw: 'vaantjes pakken bij het publiek', route: ['Warns', 'Hindeloopen'],
-    opdrachten: [publiek(1), bocht(-1), splits('Warns', 'Koudum', true), bochtNa('Warns'), publiek(-1), brug(), splits('Hindeloopen', 'Balk'), bochtNa('Hindeloopen'), publiek(1), stempel(-1, 'Hindeloopen')],
+  { nr: 5, van: 'Stavoren', naar: 'Hindeloopen', nieuw: 'vaantjes pakken bij het publiek', route: ['Molkwerum', 'Hindeloopen'], dorpen: [],
+    opdrachten: [publiek(1), bocht(-1), splits('Molkwerum', 'Koudum', true), bochtNa('Molkwerum'), publiek(-1), brug(), splits('Hindeloopen', 'Gaast'), bochtNa('Hindeloopen'), publiek(1), stempel(-1, 'Hindeloopen')],
     start: { bocht: 1, wak: 1, stempel: 1, splits: 0, brug: 1, publiek: 0 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 2, brug: 3, publiek: 2 } },
-  { nr: 6, van: 'Hindeloopen', naar: 'Workum', nieuw: 'langere route, minder bedenktijd', route: ['Koudum', 'It Heidenskip', 'Workum'],
-    opdrachten: [bocht(1), splits('Koudum', 'Stavoren', true), bochtNa('Koudum'), publiek(-1), wak(), splits('It Heidenskip', 'Makkum'), bochtNa('It Heidenskip'), brug(), splits('Workum', 'Lemmer'), bochtNa('Workum'), stempel(1, 'Workum')],
-    start: { bocht: 1, wak: 1, stempel: 1, splits: 1, brug: 1, publiek: 1 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3 } },
-  { nr: 7, van: 'Workum', naar: 'Bolsward', nieuw: 'de haas inhalen', route: ['Parrega', 'Bolsward'],
-    opdrachten: [haas(), bocht(-1), wak(), splits('Parrega', 'Makkum', true), bochtNa('Parrega'), publiek(1), haas(), brug(), stempel(-1, 'Bolsward')],
-    start: { bocht: 1, wak: 1, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 0 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 2 } },
-  { nr: 8, van: 'Bolsward', naar: 'Harlingen', nieuw: 'combinaties en tegenwind', route: ['Witmarsum', 'Harlingen'],
-    opdrachten: [wind(), bocht(1, { vaantje: true }), wak(), splits('Witmarsum', 'Makkum', true), bochtNa('Witmarsum'), publiek(-1), wind(), bocht(-1, { vaantje: true }), brug(), stempel(1, 'Harlingen')],
+  { nr: 6, van: 'Hindeloopen', naar: 'Workum', nieuw: 'de haas inhalen', route: null, dorpen: [],
+    opdrachten: [haas(), bocht(-1), wak(), publiek(1), haas(), brug(), bocht(1), stempel(1, 'Workum')],
+    start: { bocht: 1, wak: 1, stempel: 1, brug: 1, publiek: 1, haas: 0 }, max: { bocht: 3, wak: 3, stempel: 3, brug: 3, publiek: 3, haas: 2 } },
+  { nr: 7, van: 'Workum', naar: 'Bolsward', nieuw: 'langere route, minder bedenktijd', route: ['Parrega', 'Tjerkwerd', 'Bolsward'], dorpen: [],
+    opdrachten: [bocht(1), splits('Parrega', 'Makkum', true), bochtNa('Parrega'), publiek(-1), wak(), splits('Tjerkwerd', 'Exmorra'), bochtNa('Tjerkwerd'), haas(), splits('Bolsward', 'Pingjum'), bochtNa('Bolsward'), stempel(-1, 'Bolsward')],
+    start: { bocht: 1, wak: 1, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 1 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 3 } },
+  { nr: 8, van: 'Bolsward', naar: 'Harlingen', nieuw: 'combinaties en tegenwind', route: ['Witmarsum', 'Harlingen'], dorpen: [['Schettens', 2], ['Arum', 6], ['Kimswerd', 7]],
+    opdrachten: [wind(), bocht(1, { vaantje: true }), wak(), splits('Witmarsum', 'Pingjum', true), bochtNa('Witmarsum'), publiek(-1), wind(), bocht(-1, { vaantje: true }), brug(), stempel(1, 'Harlingen')],
     start: { bocht: 2, wak: 2, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 1, wind: 0 }, max: { bocht: 4, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 3, wind: 2 } },
-  { nr: 9, van: 'Harlingen', naar: 'Franeker', nieuw: 'lange bochten', route: ['Midlum', 'Franeker'],
-    opdrachten: [bocht(-1, { lang: true }), wak(), haas(), bocht(1, { lang: true }), splits('Midlum', 'Sexbierum', true), bochtNa('Midlum'), publiek(1), bocht(-1, { lang: true, vaantje: true }), stempel(1, 'Franeker')],
+  { nr: 9, van: 'Harlingen', naar: 'Franeker', nieuw: 'lange bochten', route: ['Getswerderzijl', 'Franeker'], dorpen: [['De Blynse', 1]],
+    opdrachten: [bocht(-1, { lang: true }), wak(), haas(), bocht(1, { lang: true }), splits('Getswerderzijl', 'Midlum', true), bochtNa('Getswerderzijl'), publiek(1), bocht(-1, { lang: true, vaantje: true }), stempel(1, 'Franeker')],
     start: { bocht: 2, wak: 2, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 1 }, max: { bocht: 4, wak: 4, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 3 } },
-  { nr: 10, van: 'Franeker', naar: 'Dokkum', nieuw: 'alles door elkaar, hoger tempo', route: ['Berlikum', 'Stiens', 'Hallum', 'Dokkum'], nader: 5.5, pauze: 3,
-    opdrachten: [splits('Berlikum', 'Dronrijp', true), bochtNa('Berlikum'), wak(), brug(), splits('Stiens', 'Leeuwarden'), bochtNa('Stiens'), publiek(-1), haas(), splits('Hallum', 'Ferwert'), bochtNa('Hallum'), bocht(1, { vaantje: true }), splits('Dokkum', 'Holwerd'), bochtNa('Dokkum'), stempel(-1, 'Dokkum')],
+  { nr: 10, van: 'Franeker', naar: 'Dokkum', nieuw: 'alles door elkaar, hoger tempo', route: ['Berlikum', 'Bartlehiem', 'Burdaard', 'Dokkum'], nader: 5.5, pauze: 3,
+    dorpen: [['Dongjum', -1], ['Boer', -1], ['Wier', 2], ['Sint Annaparochie', 2], ['Vrouwenparochie', 3], ['Vrouwbuurstermolen', 3], ['Oude Leije', 3], ['Finkum', 3], ['Tergracht', 6], ['Hoge Brug', 10]],
+    opdrachten: [splits('Berlikum', 'Menaldum', true), bochtNa('Berlikum'), wak(), brug(), splits('Bartlehiem', 'Stiens'), bochtNa('Bartlehiem'), publiek(-1), haas(), splits('Burdaard', 'Hallum'), bochtNa('Burdaard'), bocht(1, { vaantje: true }), splits('Dokkum', 'Holwerd'), bochtNa('Dokkum'), stempel(-1, 'Dokkum')],
     start: { bocht: 2, wak: 2, stempel: 2, splits: 2, brug: 2, publiek: 2, haas: 2 }, max: { bocht: 4, wak: 4, stempel: 4, splits: 4, brug: 4, publiek: 4, haas: 4 } },
-  { nr: 11, van: 'Dokkum', naar: 'Leeuwarden', nieuw: 'de finale', route: ['Birdaard', 'Bartlehiem', 'Leeuwarden'], nader: 6, pauze: 4,
-    opdrachten: [bocht(-1, { vaantje: true }), splits('Birdaard', 'Ee', true), bochtNa('Birdaard'), wak(), brug(), splits('Bartlehiem', 'Rinsumageest'), bochtNa('Bartlehiem'), haas(), publiek(1), wind(), splits('Leeuwarden', 'Grou'), bochtNa('Leeuwarden'), stempel(1, 'Leeuwarden')],
+  { nr: 11, van: 'Dokkum', naar: 'Leeuwarden', nieuw: 'de finale', route: ['Burdaard', 'Bartlehiem', 'Leeuwarden'], nader: 6, pauze: 4,
+    dorpen: [['Hoge Brug', -1], ['Tergracht', 3], ['Aldtsjerk', 7], ['Oentsjerk', 8], ['Gytsjerk', 9]],
+    opdrachten: [bocht(-1, { vaantje: true }), splits('Burdaard', 'Ee', true), bochtNa('Burdaard'), wak(), brug(), splits('Bartlehiem', 'Damwâld'), bochtNa('Bartlehiem'), haas(), publiek(1), wind(), splits('Leeuwarden', 'Finkum'), bochtNa('Leeuwarden'), stempel(1, 'Leeuwarden')],
     start: { bocht: 2, wak: 2, stempel: 2, splits: 2, brug: 2, publiek: 2, haas: 2, wind: 1 }, max: { bocht: 4, wak: 4, stempel: 4, splits: 4, brug: 4, publiek: 4, haas: 4, wind: 4 } }
 ];
 ETAPPES.forEach(e => { if (e.opdrachten) e.opdrachten[0].t = 8; });
@@ -285,16 +288,40 @@ for (const kant of [-1, 1]) {
   const s = new THREE.Mesh(geo, sneeuwMat); s.position.set(kant * 1.5, 0.004, -BAAN_L / 2 + 0.9); s.userData.kant = kant; wereld.add(s); buigbaar.push(s);
 }
 // dennentakken in de sneeuw langs de baan; op elke derde een vlaggetje (Nederland / Friesland)
-const takGeo = bouw([
-  [G.cil6, '#5a3d24', [0, 0.06, 0], [0, 0, 0], [0.018, 0.14, 0.018]],
-  [G.kegel, '#2c5a36', [0, 0.22, 0], [0, 0, 0], [0.14, 0.34, 0.14]],
-  [G.kegel, '#3b7246', [0, 0.36, 0], [0, 0.5, 0], [0.11, 0.28, 0.11]],
-  [G.kegel, '#f4f8fc', [0, 0.47, 0], [0, 0.5, 0], [0.055, 0.1, 0.055]],
-  [G.kegel, '#2c5a36', [0.1, 0.15, 0.03], [0, 0, -0.35], [0.08, 0.22, 0.08]],
-  [G.kegel, '#f4f8fc', [0.13, 0.24, 0.03], [0, 0, -0.35], [0.04, 0.07, 0.04]],
-  [G.kegel, '#3b7246', [-0.09, 0.13, -0.04], [0, 0, 0.3], [0.08, 0.2, 0.08]],
-  [G.bolLaag, '#f4f8fc', [0, 0.02, 0], [0, 0, 0], [0.2, 0.05, 0.16]]
-]);
+// sparretje: lagen met getande, iets hangende takranden en sneeuw bovenop elke laag
+function sterKegel(seg = 16, diep = 0.58, hang = 0.12) {
+  const g = new THREE.ConeGeometry(1, 1, seg, 1), pos = g.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i), r = Math.hypot(x, z);
+    if (y < -0.49 && r > 0.5) {
+      const k = Math.round(Math.atan2(z, x) / (Math.PI * 2 / seg));
+      const f = (k & 1) ? diep : 1; pos.setXYZ(i, x * f, y - ((k & 1) ? 0 : hang), z * f);
+    }
+  }
+  g.computeVertexNormals(); return g;
+}
+const G_ster = sterKegel(), G_sterSneeuw = sterKegel(16, 0.7, 0.04);
+// staafje van p0 naar p1 (voor takken)
+const _yAs = new THREE.Vector3(0, 1, 0);
+function staaf(p0, p1, r0, r1, kleur, seg = 5) {
+  const a = new THREE.Vector3(...p0), b = new THREE.Vector3(...p1), d = b.clone().sub(a), len = d.length();
+  const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().setFromUnitVectors(_yAs, d.normalize()));
+  return [new THREE.CylinderGeometry(r1, r0, len, seg), kleur, a.add(b).multiplyScalar(0.5).toArray(), [e.x, e.y, e.z]];
+}
+function maakSparGeo(lagen, hoogte) {
+  const groen = ['#1d4529', '#22502f', '#285b37', '#2f663f', '#36704a'], d = [];
+  d.push([G.cil6, '#4a3220', [0, 0.06, 0], [0, 0, 0], [0.022, 0.14, 0.022]]);
+  for (let i = 0; i < lagen; i++) {
+    const f = i / lagen, r = 0.22 * (1 - f * 0.78), h = hoogte * 0.34 * (1 - f * 0.35), y = 0.13 + f * hoogte * 0.78 + h / 2;
+    d.push([G_ster, groen[Math.min(4, i)], [0, y, 0], [0, i * 0.7, 0], [r, h, r]]);
+    d.push([G_sterSneeuw, '#f1f6fb', [0, y + h * 0.28, 0], [0, i * 0.7 + 0.2, 0], [r * 0.82, h * 0.45, r * 0.82]]);
+  }
+  d.push([G.kegel, '#36704a', [0, 0.16 + hoogte * 0.86, 0], [0, 0, 0], [0.035, hoogte * 0.2, 0.035]], [G.kegel, '#f1f6fb', [0, 0.19 + hoogte * 0.9, 0], [0, 0, 0], [0.025, hoogte * 0.1, 0.025]]);
+  d.push([G.bolLaag, '#f4f8fc', [0, 0.02, 0], [0, 0, 0], [0.26, 0.06, 0.22]]);
+  return bouw(d);
+}
+const takGeos = [maakSparGeo(4, 0.62), maakSparGeo(5, 0.78), maakSparGeo(3, 0.5)];
+const takGeo = takGeos[0];
 const stokGeo = bouw([[G.cil6, '#e8e2d4', [0, 0.6, 0], [0, 0, 0], [0.012, 1.2, 0.012]], [G.bolLaag, '#d9b23a', [0, 1.22, 0], [0, 0, 0], 0.022]]);
 const vlagTex = [
   canvasTex(96, 64, (c, w, h) => { ['#ae1c28', '#ffffff', '#21468b'].forEach((k, i) => { c.fillStyle = k; c.fillRect(0, i * h / 3, w, h / 3 + 1); }); }),
@@ -312,7 +339,7 @@ const vlagGeo = new THREE.PlaneGeometry(0.24, 0.16, 6, 1).translate(0.12, 0, 0);
 const palen = [];   // (heten nog 'palen': ze schuiven mee en buigen mee in de bocht)
 for (let i = 0; i < 10; i++) for (const kant of [-1, 1]) {
   const p = new THREE.Group();
-  const tak = new THREE.Mesh(takGeo, vcMat); tak.rotation.y = Math.random() * 6; tak.scale.setScalar(0.85 + Math.random() * 0.35); p.add(tak);
+  const tak = new THREE.Mesh(takGeos[(i * 2 + (kant > 0 ? 1 : 0)) % 3], vcMat); tak.rotation.y = Math.random() * 6; tak.scale.setScalar(0.85 + Math.random() * 0.3); p.add(tak);
   if ((i + (kant > 0 ? 1 : 0)) % 3 === 0) {
     const stok = new THREE.Mesh(stokGeo, vcMat); stok.position.x = kant * 0.08; p.add(stok);
     const vlag = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[(i + kant + 2) % 2], side: THREE.DoubleSide }));
@@ -416,9 +443,21 @@ function maakBoerderij() {
   d.push([G.doos, '#2f5d3a', [1.2, 1.8, 1.75], [0, 0, 0], [1.4, 2.6, 0.05]], [G.doos, '#f4f8fc', [0, 4.6, -0.6], [0, 0, 0], [0.4, 0.8, 0.4]]);
   const g = new THREE.Group(); g.add(new THREE.Mesh(bouw(d), vcMat)); return g;
 }
+// knotwilg: dikke, iets scheve stam met een knobbelige kop en een waaier van lange gouden twijgen
 const wilgGeo = (() => {
-  const d = [[G.cil, '#5e554a', [0, 0.8, 0], [0, 0, 0], [0.2, 1.6, 0.2]], [G.bolLaag, '#4e463c', [0, 1.62, 0], [0, 0, 0], [0.28, 0.2, 0.28]], [G.bolLaag, '#f4f8fc', [0, 0.04, 0], [0, 0, 0], [0.5, 0.08, 0.5]]];
-  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2, h = 0.9 + (i % 3) * 0.3; d.push([G.cil6, '#6a5a3a', [Math.cos(a) * 0.18, 1.65 + h / 2, Math.sin(a) * 0.18], [Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3], [0.018, h, 0.018]]); }
+  const d = [[new THREE.CylinderGeometry(0.15, 0.22, 1.5, 10), '#5b5146', [0, 0.75, 0], [0, 0, 0.04]], [G.bolLaag, '#f4f8fc', [0, 0.04, 0], [0, 0, 0], [0.5, 0.08, 0.45]]];
+  for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; d.push([G.bolLaag, i % 2 ? '#4b4239' : '#574d42', [0.03 + Math.cos(a) * 0.12, 1.52 + (i % 3) * 0.04, Math.sin(a) * 0.12], [0, a, 0], [0.13, 0.11, 0.12]]); }
+  for (let i = 0; i < 4; i++) d.push([G.bol, '#3f372f', [Math.cos(i * 1.7) * 0.18, 0.5 + i * 0.25, Math.sin(i * 1.7) * 0.18], [0, 0, 0], [0.05, 0.07, 0.05]]);   // knoesten
+  d.push([G.bolLaag, '#f1f6fb', [0.03, 1.66, 0], [0, 0, 0], [0.22, 0.06, 0.2]]);
+  const kleuren = ['#9a6b32', '#b07a38', '#8a4f2a', '#a8642e', '#7d5a34'];
+  for (let i = 0; i < 30; i++) {
+    const a = i * 2.39996 + 0.3, t = 0.12 + (i % 5) * 0.09, L = 0.8 + ((i * 7) % 9) * 0.1;
+    const x0 = 0.03 + Math.cos(a) * 0.14, z0 = Math.sin(a) * 0.14, y0 = 1.6;
+    const m = [x0 + Math.cos(a) * Math.sin(t) * L * 0.55, y0 + Math.cos(t) * L * 0.55, z0 + Math.sin(a) * Math.sin(t) * L * 0.55];
+    const t2 = t + 0.12, e = [m[0] + Math.cos(a) * Math.sin(t2) * L * 0.45, m[1] + Math.cos(t2) * L * 0.45, m[2] + Math.sin(a) * Math.sin(t2) * L * 0.45];
+    const k = kleuren[i % kleuren.length];
+    d.push(staaf([x0, y0, z0], m, 0.016, 0.011, k), staaf(m, e, 0.011, 0.004, k));
+  }
   return bouw(d);
 })();
 const popGeo = bouw([[G.bol, '#f4f8fc', [0, 0.28, 0], [0, 0, 0], 0.3], [G.bol, '#f4f8fc', [0, 0.7, 0], [0, 0, 0], 0.22], [G.bol, '#f4f8fc', [0, 1.02, 0], [0, 0, 0], 0.15],
@@ -1184,6 +1223,33 @@ function handTotVaantje(vg, handInfo) {
   return d;
 }
 function pakVaantje(vg) { vg.userData.vl.visible = false; toon(1320, 0.08); toon(1760, 0.12, 0.06, 0.12); }
+// ---------- Plaatsnaamborden langs de baan (dorpen op de route, in de echte volgorde) ----------
+const dorpPaal = bouw([[G.cil6, '#cfd6dc', [-0.42, 0.62, 0], [0, 0, 0], [0.025, 1.24, 0.025]], [G.cil6, '#cfd6dc', [0.42, 0.62, 0], [0, 0, 0], [0.025, 1.24, 0.025]], [G.bolLaag, '#f4f8fc', [0, 0.03, 0], [0, 0, 0], [0.6, 0.07, 0.25]]]);
+let dorpRij = [], dorpBorden = [], dorpGehad = new Set();
+function maakDorpsbord(naam) {
+  const g = new THREE.Group(); g.add(new THREE.Mesh(dorpPaal, vcMat));
+  const tex = canvasTex(512, 150, (c, w, h) => {
+    c.fillStyle = '#ffffff'; c.beginPath(); c.roundRect(2, 2, w - 4, h - 4, 18); c.fill();
+    c.fillStyle = '#1f4fa0'; c.beginPath(); c.roundRect(12, 12, w - 24, h - 24, 12); c.fill();
+    let f = 76; c.font = `bold ${f}px system-ui, sans-serif`; while (c.measureText(naam).width > w - 60 && f > 30) { f -= 4; c.font = `bold ${f}px system-ui, sans-serif`; }
+    c.fillStyle = '#ffffff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(naam, w / 2, h / 2 + 3);
+  });
+  const plaat = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.29), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); plaat.position.y = 1.2; g.add(plaat);
+  g.rotation.y = -0.35; g.userData.dorp = naam; wereld.add(g); return g;
+}
+function updateDorpen(dt) {
+  if (fase === 'rit' && E.dorpen) for (const [naam, idx] of E.dorpen) {
+    const tijdVoor = idx < 0 ? ritT > 1 : opdrIndex > idx || (opdrIndex === idx && opdr);
+    if (tijdVoor && !dorpGehad.has(naam)) { dorpGehad.add(naam); dorpRij.push(naam); }
+  }
+  const laatste = dorpBorden[dorpBorden.length - 1];
+  if (dorpRij.length && (!laatste || laatste.position.z > -22)) { const b = maakDorpsbord(dorpRij.shift()); b.position.set(2.45, 0, -30); dorpBorden.push(b); }
+  for (const b of [...dorpBorden]) {
+    b.position.z += v * dt; b.position.x = 2.45 + bochtX(-b.position.z); b.scale.setScalar(Math.min(1, (34 + b.position.z) / 4));
+    if (b.position.z > 6) { wereld.remove(b); dorpBorden.splice(dorpBorden.indexOf(b), 1); }
+  }
+}
+function wisDorpen() { for (const b of dorpBorden) wereld.remove(b); dorpBorden = []; dorpRij = []; dorpGehad = new Set(); }
 // ---------- De haas: een schaatser die je moet inhalen ----------
 function maakHaas() {
   const f = maakFiguur({ trui: '#e86a1a', band: '#ffffff', accent: '#1b1b1b', muts: ['#ffffff', '#e86a1a'], sjaal: '#ffffff', kousen: ['#e86a1a', '#ffffff'] });
@@ -1312,7 +1378,7 @@ let aanmoedigT = 0, langzaamT = 0, ritBasisY = 1.6, ritten = [], volgendeT = 0, 
 let meting = null;
 function startRit(p) {
   zetWolk('Daar gaan we!'); fase = 'rit'; faseT = 0; ritT = 0; opdrIndex = 0; afstand = 0; resultaten = []; slagen = 0; ritBasisY = p.y; volgendeT = 0;
-  gebeurtenis('rit-start', { etappe: E.nr, niveau: { ...niveau } });
+  gebeurtenis('rit-start', { etappe: E.nr, niveau: { ...niveau } }); wisDorpen();
 }
 // hoe ver zit je hand (de stempelkaart) opzij van het midden van de baan, naar kant k?
 function reikOpzij(h, k) {
@@ -1722,7 +1788,7 @@ function update(p, q, frame, ref, dt) {
     const kr = object && object.userData.kraam ? object : null;   // geen dennentak midden in het kraampje
     paal.visible = !(kr && Math.sign(paal.userData.x0) === Math.sign(kr.userData.sx) && Math.abs(paal.position.z - kr.position.z) < 1.0);
   }
-  wapperVlaggen(tijd); updateDecor(dt, v, tijd); updateSneeuw(dt, v, tijd);
+  wapperVlaggen(tijd); updateDecor(dt, v, tijd); updateSneeuw(dt, v, tijd); updateDorpen(dt);
   if (object && object.userData.publiek) for (const t of object.userData.publiek) zetToeschouwer(t, tijd, true);
   if (vork) { vork.userData.dDiv -= Math.max(v, 1) * dt; if (vork.userData.dDiv < -(VORK_L + 2)) { wereld.remove(vork); vork = null; } }
   if (object && object.isLineSegments) {   // windstrepen
@@ -1787,6 +1853,7 @@ function voorbeeld(t) {
     else if (o === 'publiek') { plaatsObject(maakVaantje(1, 0.85, 1.1)); }
     else if (o === 'haas') { plaatsObject(maakHaas()); object.userData.vbHaas = true; }
     else if (o === 'wak-rechts') plaatsObject(maakWak(1));
+    else if (o === 'dorp') { const b = maakDorpsbord('Dearsumerhûske'); b.position.set(2.45, 0, -4); }
     else if (o === 'kruisje') { kruisje.visible = true; kruisje.position.set(0, 1.5, -0.6); kruisje.scale.setScalar(1); }
     else if (o === 'bocht' || o === 'bocht-rechts') { const r = o === 'bocht' ? -1 : 1; plaatsObject(maakBochtBorden(r)); bochtK = r * D.bochtK; bochtD0 = 3; }
     else if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.95 : 1.05, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
@@ -1899,6 +1966,7 @@ startKnop.addEventListener('click', async () => {
     opdr = null; opdrIndex = 0; volgendeT = 0; reikAfst = null; kaartStaat = null; kaart.visible = false; bochtK = 0; bochtD0 = 0; zetBalk(null); resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
     kal = null; niveau = {}; reeks = {}; laadEtappe(+kiesEtappe.value);
     for (const c of [...wereld.children]) if (c.userData.vaantjeGroep) wereld.remove(c);
+    wisDorpen();
     toonTijd = document.getElementById('optTijd').checked;
     lijfAan = document.getElementById('optLijf').checked; sneeuw.visible = document.getElementById('optSneeuw').checked; kruisje.visible = false; bochtS = 0;
     zetWolk('Sta even stil en kijk recht vooruit');
