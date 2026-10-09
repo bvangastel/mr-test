@@ -40,7 +40,8 @@
       <li>Leg de controllers weg en zet een stoel binnen handbereik.</li>
       <li>Kies een etappe en druk op Start. Sta ontspannen en kijk recht vooruit; na 3 seconden stilstaan verschijnt de ijsbaan.</li>
       <li><b>Schaatsen</b> = gewicht naar links en rechts verplaatsen. Hoe meer slagen, hoe harder je gaat.</li>
-      <li>Eerst een korte <b>meting</b>: hoe ver je leunt en reikt. Daarna past het spel zich aan jou aan: gaat het goed, dan wordt het een stapje zwaarder.</li>
+      <li>Eerst een korte <b>meting</b>: hoe ver je leunt en reikt. Daarna past het spel zich aan jou aan: gaat het twee keer goed, dan wordt het een stapje zwaarder (je ziet een klein ▲-signaal).</li>
+      <li>Bij een <b>splitsing</b> wijs je met je arm de kant aan van de plaats die nu komt.</li>
       <li>Elke etappe duurt 3–4 minuten. Na de finish kies je in een zwevend menu: nog een keer of door naar de volgende etappe (tik met je vinger op de knop, of wijs en knijp). Ga je zitten, dan pauzeert de rit.</li>
     </ol>
   </div>
@@ -51,18 +52,19 @@
   </div>
   <div class="vak opties">
     <label><input type="checkbox" id="optLijf" checked> Eigen lijf tonen (half doorzichtig)</label><br>
-    <label><input type="checkbox" id="optSneeuw" checked> Sneeuwval</label>
+    <label><input type="checkbox" id="optSneeuw" checked> Sneeuwval</label><br>
+    <label><input type="checkbox" id="optTijd" checked> Resterende tijd tonen</label>
   </div>
   <button id="start" disabled>Even geduld…</button>
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.12</div>
+  <div id="versie">versie 0.13</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.12';
+const VERSIE = '0.13';
 
 // ---------- Instellingen ----------
 const D = {
@@ -71,6 +73,7 @@ const D = {
   vMax: 5.5,             // maximale snelheid (m/s)
   remTijd: 3.0,          // snelheid halveert ongeveer in deze tijd
   stapZij: 0.20, stapTijd: 0.15,
+  wijsZij: 0.30, wijsOnder: 0.55, wijsTijd: 0.3,   // aanwijzen: hand 30 cm opzij van je hoofd, niet lager dan 55 cm onder je ogen, 0,3 s
   knie: 0.10, knieTijd: 0.25,   // bukken t.o.v. je schaatshouding, opgeteld terwijl de brug over je heen gaat
   rugTijd: 1.5,
   zitten: 0.42,          // hoofd zo veel lager dan bij het opstellen (1 s) = zitten = pauze
@@ -94,8 +97,14 @@ const D = {
   routeTijd: 6           // zo lang toont het maatje de route bij de start
 };
 // ---------- Etappes (levels) ----------
-const wak = () => ({ id: 'wak', naam: 'Wak', aankondiging: 'Een wak! Stap opzij naar links', goed: 'Goed ontweken!', mis: 'Oei, natte voeten!' });
-const bocht = (r) => ({ id: 'bocht', richting: r, naam: r < 0 ? 'Bocht naar links' : 'Bocht naar rechts', aankondiging: r < 0 ? 'Bocht naar links! Leun straks mee naar links' : 'Bocht naar rechts! Leun straks mee naar rechts', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' });
+const wak = () => ({ id: 'wak', naam: 'Wak', goed: 'Goed ontweken!', mis: 'Oei, natte voeten!' });
+const brug = () => ({ id: 'brug', naam: 'Brug', aankondiging: 'Een lage brug! Straks door je knieën', goed: 'Mooi gebukt!', mis: 'Au, kop gestoten!' });
+const wind = () => ({ id: 'wind', naam: 'Tegenwind', aankondiging: 'Tegenwind! Handen op je rug', goed: 'Sterk! Door de wind heen', mis: 'Volgende keer handen op je rug' });
+const haas = () => ({ id: 'haas', naam: 'Haas inhalen', aankondiging: 'Daar is de haas! Haal hem in!', goed: 'Ingehaald! Wat een tempo!', mis: 'Hij was net te snel. Volgende keer!' });
+const publiek = (kant) => ({ id: 'publiek', kant, naam: `Vaantje (${kant < 0 ? 'links' : 'rechts'})`, aankondiging: `Pak het vaantje ${kant < 0 ? 'links' : 'rechts'}!`, goed: 'Gepakt!', mis: 'Net gemist!' });
+const bocht = (r, o = {}) => ({ id: 'bocht', richting: r, ...o, naam: (r < 0 ? 'Bocht naar links' : 'Bocht naar rechts') + (o.lang ? ', lang' : '') + (o.vaantje ? ' + vaantje' : ''),
+  aankondiging: (r < 0 ? 'Bocht naar links!' : 'Bocht naar rechts!') + (o.vaantje ? ' Leun mee en pak het vaantje' : o.lang ? ' Een lange: blijf leunen' : r < 0 ? ' Leun straks mee naar links' : ' Leun straks mee naar rechts'),
+  goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' });
 const bochtNa = (stad) => ({ id: 'bocht', naSplits: true, naam: 'Bocht na ' + stad, goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' });
 const stempel = (kant, stad) => ({ id: 'stempel', kant, stad, naam: `Stempel ${stad} (${kant < 0 ? 'links' : 'rechts'})`, aankondiging: `Stempelpost ${stad}! We stoppen even`, goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, we gaan verder' });
 const splits = (stad, anders, eerste) => ({ id: 'splits', stad, anders, naam: 'Splitsing ' + stad, aankondiging: eerste ? 'Een splitsing! Welke plaats komt nu?' : 'Weer een splitsing! Welke plaats komt nu?', goed: `Goed onthouden! Op naar ${stad}`, mis: 'Oei, verkeerde kant!' });
@@ -110,24 +119,48 @@ const ETAPPES = [
   { nr: 3, van: 'IJlst', naar: 'Sloten', nieuw: 'splitsing: route onthouden', route: ['Woudsend', 'Sloten'],
     opdrachten: [bocht(1), splits('Woudsend', 'Heeg', true), bochtNa('Woudsend'), wak(), bocht(-1), splits('Sloten', 'Balk'), bochtNa('Sloten'), stempel(-1, 'Sloten')],
     start: { bocht: 1, wak: 1, stempel: 1, splits: 0 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 2 } },
-  { nr: 4, van: 'Sloten', naar: 'Stavoren', nieuw: 'brug (bukken)' }, { nr: 5, van: 'Stavoren', naar: 'Hindeloopen', nieuw: 'reiken naar het publiek' },
-  { nr: 6, van: 'Hindeloopen', naar: 'Workum', nieuw: 'langere route, minder bedenktijd' }, { nr: 7, van: 'Workum', naar: 'Bolsward', nieuw: 'haas inhalen' },
-  { nr: 8, van: 'Bolsward', naar: 'Harlingen', nieuw: 'combinaties' }, { nr: 9, van: 'Harlingen', naar: 'Franeker', nieuw: 'langere bochten' },
-  { nr: 10, van: 'Franeker', naar: 'Dokkum', nieuw: 'alles door elkaar, hoger tempo' }, { nr: 11, van: 'Dokkum', naar: 'Leeuwarden', nieuw: 'finale' }
+  { nr: 4, van: 'Sloten', naar: 'Stavoren', nieuw: 'bruggen (bukken)', route: null,
+    opdrachten: [brug(), bocht(-1), wak(), brug(), bocht(1), wak(), brug(), stempel(1, 'Stavoren')],
+    start: { bocht: 1, wak: 1, stempel: 1, brug: 0 }, max: { bocht: 3, wak: 3, stempel: 3, brug: 2 } },
+  { nr: 5, van: 'Stavoren', naar: 'Hindeloopen', nieuw: 'vaantjes pakken bij het publiek', route: ['Warns', 'Hindeloopen'],
+    opdrachten: [publiek(1), bocht(-1), splits('Warns', 'Koudum', true), bochtNa('Warns'), publiek(-1), brug(), splits('Hindeloopen', 'Balk'), bochtNa('Hindeloopen'), publiek(1), stempel(-1, 'Hindeloopen')],
+    start: { bocht: 1, wak: 1, stempel: 1, splits: 0, brug: 1, publiek: 0 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 2, brug: 3, publiek: 2 } },
+  { nr: 6, van: 'Hindeloopen', naar: 'Workum', nieuw: 'langere route, minder bedenktijd', route: ['Koudum', 'It Heidenskip', 'Workum'],
+    opdrachten: [bocht(1), splits('Koudum', 'Stavoren', true), bochtNa('Koudum'), publiek(-1), wak(), splits('It Heidenskip', 'Makkum'), bochtNa('It Heidenskip'), brug(), splits('Workum', 'Lemmer'), bochtNa('Workum'), stempel(1, 'Workum')],
+    start: { bocht: 1, wak: 1, stempel: 1, splits: 1, brug: 1, publiek: 1 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3 } },
+  { nr: 7, van: 'Workum', naar: 'Bolsward', nieuw: 'de haas inhalen', route: ['Parrega', 'Bolsward'],
+    opdrachten: [haas(), bocht(-1), wak(), splits('Parrega', 'Makkum', true), bochtNa('Parrega'), publiek(1), haas(), brug(), stempel(-1, 'Bolsward')],
+    start: { bocht: 1, wak: 1, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 0 }, max: { bocht: 3, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 2 } },
+  { nr: 8, van: 'Bolsward', naar: 'Harlingen', nieuw: 'combinaties en tegenwind', route: ['Witmarsum', 'Harlingen'],
+    opdrachten: [wind(), bocht(1, { vaantje: true }), wak(), splits('Witmarsum', 'Makkum', true), bochtNa('Witmarsum'), publiek(-1), wind(), bocht(-1, { vaantje: true }), brug(), stempel(1, 'Harlingen')],
+    start: { bocht: 2, wak: 2, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 1, wind: 0 }, max: { bocht: 4, wak: 3, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 3, wind: 2 } },
+  { nr: 9, van: 'Harlingen', naar: 'Franeker', nieuw: 'lange bochten', route: ['Midlum', 'Franeker'],
+    opdrachten: [bocht(-1, { lang: true }), wak(), haas(), bocht(1, { lang: true }), splits('Midlum', 'Sexbierum', true), bochtNa('Midlum'), publiek(1), bocht(-1, { lang: true, vaantje: true }), stempel(1, 'Franeker')],
+    start: { bocht: 2, wak: 2, stempel: 1, splits: 1, brug: 1, publiek: 1, haas: 1 }, max: { bocht: 4, wak: 4, stempel: 3, splits: 3, brug: 3, publiek: 3, haas: 3 } },
+  { nr: 10, van: 'Franeker', naar: 'Dokkum', nieuw: 'alles door elkaar, hoger tempo', route: ['Berlikum', 'Stiens', 'Hallum', 'Dokkum'], nader: 5.5, pauze: 3,
+    opdrachten: [splits('Berlikum', 'Dronrijp', true), bochtNa('Berlikum'), wak(), brug(), splits('Stiens', 'Leeuwarden'), bochtNa('Stiens'), publiek(-1), haas(), splits('Hallum', 'Ferwert'), bochtNa('Hallum'), bocht(1, { vaantje: true }), splits('Dokkum', 'Holwerd'), bochtNa('Dokkum'), stempel(-1, 'Dokkum')],
+    start: { bocht: 2, wak: 2, stempel: 2, splits: 2, brug: 2, publiek: 2, haas: 2 }, max: { bocht: 4, wak: 4, stempel: 4, splits: 4, brug: 4, publiek: 4, haas: 4 } },
+  { nr: 11, van: 'Dokkum', naar: 'Leeuwarden', nieuw: 'de finale', route: ['Birdaard', 'Bartlehiem', 'Leeuwarden'], nader: 6, pauze: 4,
+    opdrachten: [bocht(-1, { vaantje: true }), splits('Birdaard', 'Ee', true), bochtNa('Birdaard'), wak(), brug(), splits('Bartlehiem', 'Rinsumageest'), bochtNa('Bartlehiem'), haas(), publiek(1), wind(), splits('Leeuwarden', 'Grou'), bochtNa('Leeuwarden'), stempel(1, 'Leeuwarden')],
+    start: { bocht: 2, wak: 2, stempel: 2, splits: 2, brug: 2, publiek: 2, haas: 2, wind: 1 }, max: { bocht: 4, wak: 4, stempel: 4, splits: 4, brug: 4, publiek: 4, haas: 4, wind: 4 } }
 ];
 ETAPPES.forEach(e => { if (e.opdrachten) e.opdrachten[0].t = 8; });
 // niveaus: per vaardigheid een trap; 2× achter elkaar goed = een tree hoger, fout = een tree lager
 const NIVEAU = {
-  bocht: { treden: [0.30, 0.40, 0.50, 0.60, 0.70], uitleg: 'deel van je grootste leun' },
-  wak: { treden: [0.15, 0.20, 0.25, 0.30, 0.35], uitleg: 'stap opzij (m)' },
-  stempel: { treden: [1.00, 1.15, 1.30, 1.45, 1.60], uitleg: 'keer je grootste reik' },
-  splits: { treden: [4, 3.5, 3, 2.5, 2], uitleg: 'bedenktijd (s)' }
+  bocht: { treden: [0.30, 0.40, 0.50, 0.60, 0.70], naam: 'Bochten', uitleg: 'deel van je grootste leun' },
+  wak: { treden: [0.15, 0.20, 0.25, 0.30, 0.35], naam: 'Wakken', uitleg: 'stap opzij (m)' },
+  stempel: { treden: [1.00, 1.15, 1.30, 1.45, 1.60], naam: 'Stempelen', uitleg: 'keer je grootste reik' },
+  splits: { treden: [4, 3.5, 3, 2.5, 2], naam: 'Splitsingen', uitleg: 'bedenktijd (s)' },
+  brug: { treden: [0.06, 0.10, 0.14, 0.18, 0.22], naam: 'Bruggen', uitleg: 'bukken (m)' },
+  publiek: { treden: [0.80, 0.95, 1.10, 1.25, 1.40], naam: 'Vaantjes', uitleg: 'keer je grootste reik' },
+  haas: { treden: [2.6, 3.0, 3.4, 3.8, 4.2], naam: 'Haas', uitleg: 'snelheid haas (m/s)' },
+  wind: { treden: [1.5, 2.0, 2.5, 3.0, 3.5], naam: 'Tegenwind', uitleg: 'handen op je rug (s)' }
 };
 let E = ETAPPES[0], OPDRACHTEN = E.opdrachten, ROUTE = E.route || [];
 let niveau = {}, reeks = {}, kal = null;   // kal: meting (leunL/leunR/reikL/reikR in m)
 const STANDAARD = { leun: 0.25, reik: 0.75 };
 function laadEtappe(nr) {
-  E = ETAPPES[nr - 1]; OPDRACHTEN = E.opdrachten; ROUTE = E.route || [];
+  E = ETAPPES[nr - 1]; OPDRACHTEN = E.opdrachten; ROUTE = E.route || []; NADER = E.nader || 7;
   for (const k in E.max) { niveau[k] = niveau[k] === undefined ? E.start[k] : Math.max(0, Math.min(E.max[k], niveau[k])); reeks[k] = 0; }
 }
 const trede = (k) => NIVEAU[k].treden[niveau[k] ?? 0];
@@ -137,8 +170,11 @@ function pasAan(k, gelukt) {
   if (gelukt) { reeks[k] = (reeks[k] || 0) + 1; if (reeks[k] >= 2) { niveau[k] = Math.min(E.max[k], niveau[k] + 1); reeks[k] = 0; } }
   else { niveau[k] = Math.max(0, niveau[k] - 1); reeks[k] = 0; }
   if (niveau[k] !== oud) gebeurtenis('niveau', { vaardigheid: k, van: oud, naar: niveau[k], waarde: trede(k) });
+  if (niveau[k] > oud) niveauOmhoog(k);
 }
-const FINISH_T = 0, NADER = 7, POST_Z = -0.3;   // object komt in 7 s van ver naar jou toe
+const FINISH_T = 0, POST_Z = -0.3;
+let NADER = 7;   // object komt in 7 s van ver naar jou toe (sneller in de latere etappes)
+let toonTijd = true, wakKant = Math.random() < 0.5 ? -1 : 1;
 const K = { paars: 0x662A88, blauw: 0x43BFFD, roze: 0xEB69BB, geel: 0xF6F01D, donker: 0x215C9A };
 
 // ---------- three.js + WebXR ----------
@@ -425,7 +461,7 @@ const landschap = (() => {
   const bord = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.42), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, map: canvasTex(512, 98, (c, w, hh) => {
     c.fillStyle = '#21468b'; c.beginPath(); c.roundRect(3, 3, w - 6, hh - 6, 14); c.fill(); c.strokeStyle = '#ffffff'; c.lineWidth = 5; c.stroke();
     c.fillStyle = '#ffffff'; c.font = 'bold 56px Georgia, serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Elfstedentocht', w / 2, hh / 2 + 3); }) }));
-  bord.position.set(0, h + 0.45, SCHERM.z + 0.02); g.add(bord);
+  bord.position.set(0, h + 0.45, SCHERM.z + 0.02); g.add(bord); g.userData.bord = bord;
   // besneeuwd land tot aan de horizon
   const veld = new THREE.Mesh(new THREE.PlaneGeometry(120, 60).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ map: veldTex, emissive: 0x8899aa, emissiveIntensity: 0.3 }));
   veld.position.set(0, -0.012, SCHERM.z - 30); g.add(veld);
@@ -729,7 +765,7 @@ function tekenBord(r1, r2) {
 }
 
 // ---------- Objecten voor de opdrachten ----------
-function maakWak() {
+function maakWak(kant = -1) {   // kant: naar welke kant je moet stappen
   const g = new THREE.Group();
   // open water met een rafelige, opgestuwde ijsrand en losse schotsjes
   const vorm = new THREE.Shape(), n = 28, rx = 0.42, rz = 0.6;
@@ -753,8 +789,8 @@ function maakWak() {
   });
   const paal = new THREE.Mesh(bouw([[G.cil6, '#7a5230', [0, 0.45, 0], [0, 0, 0], [0.018, 0.9, 0.018]], [G.bolLaag, '#f4f8fc', [0, 0.03, 0], [0, 0, 0], [0.14, 0.05, 0.12]]]), vcMat);
   const plaat = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), new THREE.MeshBasicMaterial({ map: bordTex, transparent: true, side: THREE.DoubleSide })); plaat.position.y = 0.98; plaat.rotation.y = -0.25;
-  const bordje = new THREE.Group(); bordje.add(paal, plaat); bordje.position.set(0.62, 0, 0);
-  g.add(water, rand, bordje); g.position.x = 0.15; return g;
+  const bordje = new THREE.Group(); bordje.add(paal, plaat); bordje.position.set(-kant * 0.62, 0, 0); if (kant > 0) plaat.rotation.y = 0.25;
+  g.add(water, rand, bordje); g.position.x = -kant * 0.15; return g;
 }
 function maakBrug(hoogte) {
   const g = new THREE.Group(), hout = new THREE.MeshLambertMaterial({ color: 0x7a4a24 });
@@ -804,7 +840,7 @@ function maakSplitsing(stad, anders, juist) {
   const links = juist < 0 ? stad : anders, rechts = juist < 0 ? anders : stad;
   for (const [kant, naam] of [[-1, links], [1, rechts]]) {
     const b = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.41), new THREE.MeshBasicMaterial({ map: bordTex(naam, kant < 0), side: THREE.DoubleSide }));
-    b.position.set(kant * 0.68, 2.0, 0.03); b.rotation.y = -kant * 0.12; wijzer.add(b);
+    b.position.set(kant * 0.68, 2.0, 0.03); b.rotation.y = -kant * 0.12; wijzer.add(b); (u.borden = u.borden || {})[kant] = b;
   }
   g.userData = u;
   zetVork(g);
@@ -1121,6 +1157,85 @@ function startIjsGeluid() {   // zacht krassend ijs; volume volgt de snelheid
   ijsGeluid = gn;
 }
 
+// ---------- Vaantje bij het publiek: een toeschouwer houdt een vaantje naar de baan; pak het ----------
+const vaantjeStok = bouw([[G.cil6, '#7a5230', [0, 0.12, 0], [0, 0, 0], [0.012, 0.36, 0.012]], [G.bolLaag, '#d9b23a', [0, 0.31, 0], [0, 0, 0], 0.02]]);
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xF6F01D, transparent: true, opacity: 0.8, depthWrite: false });
+function maakVaantje(kant, afst, hoogte) {
+  const g = new THREE.Group(), L = 0.52, sy = 1.28;
+  const phi = Math.asin(Math.max(-0.9, Math.min(0.9, (sy - hoogte) / L)));
+  const t = maakToeschouwer(Math.floor(Math.random() * 8), 1);
+  t.position.set(kant * (afst + L * Math.cos(phi) + 0.05), 0, kant * 0.2); t.rotation.y = kant * Math.PI / 2;
+  t.userData.armR.rotation.set(Math.PI / 2 - phi, 0, 0); t.userData.armL.rotation.set(0.1, 0, -0.12);
+  g.add(t);
+  const vl = new THREE.Group(); vl.position.set(kant * afst, hoogte, 0); g.add(vl);
+  vl.add(new THREE.Mesh(vaantjeStok, vcMat));
+  const doek = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[1], side: THREE.DoubleSide })); doek.position.set(0, 0.25, 0); doek.rotation.y = kant > 0 ? 0.3 : Math.PI - 0.3; vl.add(doek);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.008, 6, 24), ringMat); ring.position.y = 0.1; ring.rotation.y = Math.PI / 2; vl.add(ring);
+  const doel = new THREE.Object3D(); doel.position.y = 0.1; vl.add(doel);
+  g.userData = { vaantjeGroep: true, vl, ring, doel, doek };
+  return g;
+}
+// dichtste afstand van je handen tot het vaantje
+const _vd = new THREE.Vector3();
+function handTotVaantje(vg, handInfo) {
+  vg.updateMatrixWorld(true); vg.userData.doel.getWorldPosition(_vd);
+  let d = 9;
+  for (const k of ['left', 'right', 'none']) { const h = handInfo[k]; if (!h) continue; for (const pt of [h.kaartPos, h.tip]) if (pt) d = Math.min(d, pt.distanceTo(_vd)); }
+  return d;
+}
+function pakVaantje(vg) { vg.userData.vl.visible = false; toon(1320, 0.08); toon(1760, 0.12, 0.06, 0.12); }
+// ---------- De haas: een schaatser die je moet inhalen ----------
+function maakHaas() {
+  const f = maakFiguur({ trui: '#e86a1a', band: '#ffffff', accent: '#1b1b1b', muts: ['#ffffff', '#e86a1a'], sjaal: '#ffffff', kousen: ['#e86a1a', '#ffffff'] });
+  const sch = maakSchaduw(0.35); f.add(sch);
+  f.userData.haas = true; return f;
+}
+// ---------- Voortgang op het bord boven het scherm ----------
+const vgCanvas = document.createElement('canvas'); vgCanvas.width = 1024; vgCanvas.height = 196;
+const vgTex = new THREE.CanvasTexture(vgCanvas); vgTex.colorSpace = THREE.SRGBColorSpace;
+landschap.userData.bord.material.map = vgTex; landschap.userData.bord.material.needsUpdate = true;
+function tekenVoortgang(frac, rest, midden) {
+  const c = vgCanvas.getContext('2d'), w = 1024, h = 196;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = '#21468b'; c.beginPath(); c.roundRect(4, 4, w - 8, h - 8, 26); c.fill(); c.strokeStyle = '#ffffff'; c.lineWidth = 6; c.stroke();
+  c.fillStyle = '#ffffff'; c.textBaseline = 'middle'; c.font = 'bold 50px Georgia, serif';
+  c.textAlign = 'left'; c.fillText(E.van, 34, 60); c.textAlign = 'right'; c.fillText(E.naar, w - 34, 60);
+  c.textAlign = 'center'; c.font = 'bold 42px system-ui, sans-serif'; c.fillStyle = '#F6F01D';
+  c.fillText(midden || (toonTijd && rest !== null ? `nog ${Math.floor(rest / 60)}:${String(Math.round(rest % 60)).padStart(2, '0')}` : `Etappe ${E.nr}`), w / 2, 60);
+  const x0 = 40, x1 = w - 40, y = 118, bh = 40, f = Math.max(0, Math.min(1, frac));
+  c.fillStyle = 'rgba(255,255,255,0.22)'; c.beginPath(); c.roundRect(x0, y, x1 - x0, bh, 20); c.fill();
+  c.fillStyle = '#F6F01D'; c.beginPath(); c.roundRect(x0, y, Math.max(bh, (x1 - x0) * f), bh, 20); c.fill();
+  c.fillStyle = '#ffffff'; c.beginPath(); c.arc(x0 + Math.max(bh / 2, (x1 - x0) * f - bh / 2), y + bh / 2, 26, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#21468b'; c.beginPath(); c.arc(x0 + Math.max(bh / 2, (x1 - x0) * f - bh / 2), y + bh / 2, 12, 0, Math.PI * 2); c.fill();
+  vgTex.needsUpdate = true;
+}
+// geschatte duur per opdracht (s), voor de voortgang en de resterende tijd
+const SCHATTING = { wak: 10, brug: 10, bocht: 17, splits: 9, stempel: 24, publiek: 10, haas: 18, wind: 11 };
+const schat = o => (o.naSplits ? 8 : (SCHATTING[o.id] || 12) * NADER / 7 + (o.lang ? 3 : 0) + (o.vaantje ? 3 : 0));
+function restTijd() {
+  const pauze = E.pauze ?? D.pauzeTussen;
+  let r = 8;
+  for (let i = opdrIndex + (opdr ? 1 : 0); i < OPDRACHTEN.length; i++) r += schat(OPDRACHTEN[i]) + (OPDRACHTEN[i].naSplits ? 0 : pauze);
+  if (opdr) r += Math.max(1, schat(opdr) - (ritT - opdr.start - (opdr.naSplits ? NADER : 0)));
+  else if (opdrIndex < OPDRACHTEN.length) r += Math.max(0, Math.max(OPDRACHTEN[opdrIndex].t || 0, volgendeT) - ritT);
+  else if (object && object.userData.finish) r = Math.max(0, NADER - (ritT - object.userData.start));
+  return r;
+}
+// ---------- Subtiel signaal bij een niveau omhoog ----------
+const nivCanvas = document.createElement('canvas'); nivCanvas.width = 512; nivCanvas.height = 96;
+const nivTex = new THREE.CanvasTexture(nivCanvas); nivTex.colorSpace = THREE.SRGBColorSpace;
+const nivBord = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.079), new THREE.MeshBasicMaterial({ map: nivTex, transparent: true, depthWrite: false, depthTest: false }));
+nivBord.renderOrder = 11; nivBord.visible = false; scene.add(nivBord);
+let nivT = -9;
+function niveauOmhoog(k) {
+  const c = nivCanvas.getContext('2d'); c.clearRect(0, 0, 512, 96);
+  c.fillStyle = 'rgba(36,18,58,0.8)'; c.beginPath(); c.roundRect(4, 4, 504, 88, 40); c.fill();
+  c.fillStyle = '#F6F01D'; c.font = 'bold 44px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(`▲ ${NIVEAU[k].naam} · niveau ${niveau[k] + 1}`, 256, 50);
+  nivTex.needsUpdate = true; nivT = tijd;
+  toon(1046, 0.12, 0, 0.06); toon(1568, 0.2, 0.1, 0.05);
+}
+
 // ---------- Zwevend menu na de finish: aantikken met je vinger of aanwijzen en knijpen ----------
 const menu = new THREE.Group(); menu.visible = false; scene.add(menu);
 function knopTekenen(k) {
@@ -1300,8 +1415,7 @@ function update(p, q, frame, ref, dt) {
         }
       } else {
         const k = M.kal, leun = x => x >= 0.06 ? x : STANDAARD.leun, reik = x => x >= 0.3 ? x : STANDAARD.reik;
-        kal = { leunL: leun(k.leunL), leunR: leun(k.leunR), reikL: reik(k.reikL), reikR: reik(k.reikR), gemeten: k };
-        gebeurtenis('meting', kal);
+        if (!M.klaar) { M.klaar = true; kal = { leunL: leun(k.leunL), leunR: leun(k.leunR), reikL: reik(k.reikL), reikR: reik(k.reikR), gemeten: { ...k } }; gebeurtenis('meting', kal); }
         zetWolk('Gemeten! Daar stemmen we de rit op af.', '#5ee08a'); doelPose.juich = 1;
         if (faseT > 2.5) { fase = 'uitleg'; stap = 3; faseT = 0; geluid.goed(); }
       }
@@ -1321,18 +1435,29 @@ function update(p, q, frame, ref, dt) {
         }
         // moeilijkheid op maat: afgeleid van je meting en je huidige niveau
         const kl = kal || { leunL: STANDAARD.leun, leunR: STANDAARD.leun, reikL: STANDAARD.reik, reikR: STANDAARD.reik };
-        if (opdr.id === 'bocht') opdr.drempel = Math.max(0.06, Math.min(0.30, trede('bocht') * (opdr.richting < 0 ? kl.leunL : kl.leunR)));
-        if (opdr.id === 'wak') opdr.drempel = trede('wak');
+        if (opdr.id === 'bocht') {
+          opdr.drempel = Math.max(0.06, Math.min(0.30, trede('bocht') * (opdr.richting < 0 ? kl.leunL : kl.leunR)));
+          opdr.tijd = D.bochtTijd * (opdr.lang ? 1.7 : 1); opdr.duur = D.bochtDuur * (opdr.lang ? 1.6 : 1);
+          if (opdr.vaantje) opdr.vAfst = Math.max(0.45, Math.min(1.1, 0.85 * trede('publiek') * (opdr.richting < 0 ? kl.reikL : kl.reikR)));
+        }
+        if (opdr.id === 'wak') {   // wakken wisselen van kant
+          opdr.drempel = trede('wak'); opdr.kant = wakKant = -wakKant;
+          opdr.aankondiging = `Een wak! Stap opzij naar ${opdr.kant < 0 ? 'links' : 'rechts'}`; opdr.naam = `Wak (${opdr.kant < 0 ? 'links' : 'rechts'})`;
+        }
+        if (opdr.id === 'brug') opdr.drempel = trede('brug');
+        if (opdr.id === 'wind') opdr.rugTijd = trede('wind');
+        if (opdr.id === 'haas') { opdr.vH = trede('haas'); opdr.gap = 10; }
+        if (opdr.id === 'publiek') { opdr.afst = Math.max(0.45, Math.min(1.25, trede('publiek') * (opdr.kant < 0 ? kl.reikL : kl.reikR))); opdr.hoogte = base.y * (0.55 + 0.25 * Math.random()); }
         if (opdr.id === 'stempel') opdr.reik = Math.max(0.55, Math.min(1.4, trede('stempel') * (opdr.kant < 0 ? kl.reikL : kl.reikR)));
         if (opdr.id === 'splits') opdr.kiesTijd = trede('splits');
         opdr.niveau = niveau[opdr.id];
-        plaatsObject(opdr.id === 'wak' ? maakWak() : opdr.id === 'brug' ? maakBrug(Math.max(1.0, base.y + 0.02)) : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : opdr.id === 'bocht' ? maakBochtBorden(opdr.richting, opdr.naSplits) : opdr.id === 'splits' ? maakSplitsing(opdr.stad, opdr.anders, opdr.juist = Math.random() < 0.5 ? -1 : 1) : maakWind());
+        plaatsObject(opdr.id === 'wak' ? maakWak(opdr.kant) : opdr.id === 'brug' ? maakBrug(Math.max(0.9, base.y + 0.12 - opdr.drempel)) : opdr.id === 'publiek' ? maakVaantje(opdr.kant, opdr.afst, opdr.hoogte) : opdr.id === 'haas' ? maakHaas() : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : opdr.id === 'bocht' ? maakBochtBorden(opdr.richting, opdr.naSplits) : opdr.id === 'splits' ? maakSplitsing(opdr.stad, opdr.anders, opdr.juist = Math.random() < 0.5 ? -1 : 1) : maakWind());
         zetWolk(opdr.aankondiging, '#EB69BB'); geluid.wolk(); gebeurtenis('opdracht', { id: opdr.id });
       }
       if (opdr) {
         const ot = ritT - opdr.start;
         const zObj = -14 + Math.min(ot, NADER + 2) * (14 / NADER);   // 0 = bij jou, maatje staat op -2,6
-        if (opdr.id !== 'wind' && opdr.id !== 'stempel' && opdr.id !== 'bocht' && opdr.id !== 'splits') object.position.z = zObj;
+        if (opdr.id !== 'wind' && opdr.id !== 'stempel' && opdr.id !== 'bocht' && opdr.id !== 'splits' && opdr.id !== 'haas') object.position.z = zObj;
         if (opdr.id === 'splits') {   // het splitspunt komt naar je toe; na je keuze glijdt de baan soepel de gekozen kant op
           const u = object.userData;
           if (ot <= NADER) u.dDiv = 14 * (1 - ot / NADER); else u.dDiv -= Math.max(v, 2) * dt;
@@ -1341,7 +1466,9 @@ function update(p, q, frame, ref, dt) {
           bochtK = u.cg * D.splitsK; bochtD0 = Math.max(0, u.dDiv);
         }
         // het maatje doet het voor op het moment dat het object bij hém is
-        if (opdr.id === 'wak') doelPose.zij = (zObj > -4.2 && zObj < -1.2) ? -0.35 : 0;
+        if (opdr.id === 'wak') doelPose.zij = (zObj > -4.2 && zObj < -1.2) ? opdr.kant * 0.35 : 0;
+        if (opdr.id === 'publiek' && zObj > -4.2 && zObj < -1.6) doelPose.reik = opdr.kant;
+        if (opdr.id === 'haas' && !opdr.klaar) doelPose.lean = eigenRitme;
         if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
         if (opdr.id === 'wind' && !opdr.klaar) doelPose.rug = 1;
         if (opdr.id === 'splits') doelPose.zij = -0.5;   // maatje schuift opzij zodat de wegwijzer goed te zien is
@@ -1411,25 +1538,49 @@ function update(p, q, frame, ref, dt) {
               opdr.maxLeun = Math.max(opdr.maxLeun || 0, leun); opdr.somLeun = (opdr.somLeun || 0) + leun * dt; opdr.nT = (opdr.nT || 0) + dt;
               if (leun > opdr.drempel) { opdr.hold += dt; if (opdr.reactie === undefined) opdr.reactie = inT; }
               else opdr.hold = Math.max(0, opdr.hold - dt * 2);   // korte dipjes mogen
-              const detail = () => ({ maxLeun: +opdr.maxLeun.toFixed(3), gemLeun: +(opdr.somLeun / opdr.nT).toFixed(3), drempel: +opdr.drempel.toFixed(3), niveau: opdr.niveau, hoofdOmlaag: +(base.y - p.y).toFixed(3) });
-              zetBalk(opdr.hold / D.bochtTijd);
-              if (opdr.hold >= D.bochtTijd) { opdr.detail = detail(); gelukt(); }
-              else if (inT > D.bochtDuur) { opdr.detail = detail(); mislukt(); }
-              else if (leun > opdr.drempel) zetWolk(`Goed zo! Vasthouden… ${Math.ceil(D.bochtTijd - opdr.hold)}`, '#43BFFD');
+              const detail = () => {
+                if (kal && !opdr.naSplits) { const zk = r < 0 ? 'leunL' : 'leunR'; kal[zk] = Math.min(0.45, Math.max(kal[zk], opdr.maxLeun)); }   // je leunt verder dan gemeten: drempels gaan mee
+                return { maxLeun: +opdr.maxLeun.toFixed(3), gemLeun: +(opdr.somLeun / opdr.nT).toFixed(3), drempel: +opdr.drempel.toFixed(3), niveau: opdr.niveau, hoofdOmlaag: +(base.y - p.y).toFixed(3), ...(opdr.vaantje ? { vaantje: opdr.vRes === true } : {}) }; };
+              opdr.hold = Math.min(opdr.hold, opdr.tijd);
+              // combinatie: in de bocht houdt iemand een vaantje naar de binnenkant
+              if (opdr.vaantje) {
+                if (!opdr.vObj) { opdr.vObj = maakVaantje(r, opdr.vAfst, base.y * 0.72); opdr.vZ = -14; opdr.vRes = null; wereld.add(opdr.vObj); }
+                opdr.vZ += Math.max(v, 3) * dt; opdr.vObj.position.set(bochtX(-opdr.vZ), 0, opdr.vZ);
+                if (opdr.vRes === null) {
+                  if (opdr.vZ > -3 && handTotVaantje(opdr.vObj, handInfo) < 0.16) { opdr.vRes = true; pakVaantje(opdr.vObj); }
+                  else if (opdr.vZ > 0.8) opdr.vRes = false;
+                }
+              }
+              const vKlaar = !opdr.vaantje || opdr.vRes !== null;
+              zetBalk(opdr.hold / opdr.tijd);
+              if (opdr.hold >= opdr.tijd && vKlaar) { opdr.detail = detail(); if (opdr.vaantje && !opdr.vRes) { mislukt(); zetWolk('Bocht goed, maar het vaantje gemist!'); } else gelukt(); }
+              else if (inT > opdr.duur + (opdr.vaantje ? 3 : 0)) { opdr.detail = detail(); mislukt(); }
+              else if (opdr.hold >= opdr.tijd) zetWolk('Blijf leunen… en pak het vaantje!', '#43BFFD');
+              else if (leun > opdr.drempel) zetWolk(opdr.vaantje && opdr.vRes === null && opdr.vZ > -6 ? 'Pak het vaantje!' : `Goed zo! Vasthouden… ${Math.ceil(opdr.tijd - opdr.hold)}`, '#43BFFD');
               else zetWolk(r < 0 ? 'Leun naar links!' : 'Leun naar rechts!', '#EB69BB');
             }
             zetBochtBorden(object);
           } else if (opdr.id === 'splits') {
             // let op: het maatje doet hier niets voor, anders verklapt hij het antwoord
             const kiesVanaf = NADER - opdr.kiesTijd;
-            if (ot > kiesVanaf && !opdr.nu) { opdr.nu = true; opdr.nuT = ot; zetWolk('Welke kant? Stap!', '#EB69BB'); toon(990, 0.1); }
+            if (ot > kiesVanaf && !opdr.nu) { opdr.nu = true; opdr.nuT = ot; zetWolk('Welke kant? Wijs het aan!', '#EB69BB'); toon(990, 0.1); }
             if (opdr.nu) {
-              const kant = lat > D.stapZij ? 1 : lat < -D.stapZij ? -1 : 0;
+              // aanwijzen: je geeft je maatje de richting aan met een gestrekte arm (hand ver genoeg opzij, niet te laag)
+              let kant = 0, hoe = 'wijzen';
+              for (const hk of ['left', 'right']) {
+                const h = handInfo[hk]; if (!h) continue; const pt = h.tip || h.kaartPos;
+                const zij = (pt.x - p.x) * base.rechts.x + (pt.z - p.z) * base.rechts.y;
+                if (Math.abs(zij) > D.wijsZij && pt.y > p.y - D.wijsOnder) kant = Math.sign(zij);
+              }
+              if (!kant && handen === 0) { kant = lat > D.stapZij ? 1 : lat < -D.stapZij ? -1 : 0; hoe = 'stap'; }   // geen handen in beeld: een stap telt ook
               if (kant !== 0 && kant === opdr.kantNu) opdr.hold += dt; else { opdr.hold = 0; opdr.kantNu = kant; }
+              const b = object.userData.borden;
+              if (b) for (const k of [-1, 1]) b[k].scale.setScalar(1 + (k === kant ? 0.25 * Math.min(1, opdr.hold / D.wijsTijd) : 0));
+              if (ot - opdr.nuT > 2 && !kant) zetWolk('Wijs met je arm naar de kant!', '#EB69BB');
               const naam = k => (k === opdr.juist ? opdr.stad : opdr.anders);
-              if (opdr.hold >= D.stapTijd) {
-                opdr.reactie = ot - opdr.nuT - D.stapTijd; opdr.keuze = laatsteKeuze = kant;
-                opdr.detail = { keuze: kant === opdr.juist ? 'goed' : 'fout', kant: kant < 0 ? 'links' : 'rechts', juisteKant: opdr.juist < 0 ? 'links' : 'rechts', gekozen: naam(kant), bedenktijd: opdr.kiesTijd };
+              if (opdr.hold >= (hoe === 'stap' ? D.stapTijd : D.wijsTijd)) {
+                opdr.reactie = ot - opdr.nuT - D.wijsTijd; opdr.keuze = laatsteKeuze = kant; opdr.hoe = hoe;
+                opdr.detail = { keuze: kant === opdr.juist ? 'goed' : 'fout', kant: kant < 0 ? 'links' : 'rechts', juisteKant: opdr.juist < 0 ? 'links' : 'rechts', gekozen: naam(kant), bedenktijd: opdr.kiesTijd, hoe };
                 if (kant === opdr.juist) gelukt();
                 else { mislukt(); zetWolk(`Oei, dit is ${opdr.anders}! We steken over naar ${opdr.stad}`, '#EB69BB'); }
               } else if (ot > NADER + 0.3) {
@@ -1442,22 +1593,45 @@ function update(p, q, frame, ref, dt) {
               opdr.hold = handen === 0 ? opdr.hold + dt : 0;
               if (opdr.hold > 0) { if (opdr.reactie === undefined) opdr.reactie = ot; zetWolk('Goed zo, even vasthouden…', '#43BFFD'); }
               else if (ot > 4) zetWolk(handen > 1 ? 'Ik zie je handen nog!' : 'Ik zie nog een hand!', '#EB69BB');
-              if (opdr.hold >= D.rugTijd) gelukt(); else if (ot > NADER + 3) mislukt();
+              if (opdr.hold >= opdr.rugTijd) { opdr.detail = { vasthouden: opdr.rugTijd, niveau: opdr.niveau }; gelukt(); } else if (ot > NADER + 3 + opdr.rugTijd) { opdr.detail = { vasthouden: opdr.rugTijd, niveau: opdr.niveau }; mislukt(); }
             }
+          } else if (opdr.id === 'publiek') {
+            // het vaantje komt langs; pak het met een hand (je mag ervoor reiken en leunen)
+            const d = handTotVaantje(object, handInfo); opdr.dichtst = Math.min(opdr.dichtst ?? 9, d);
+            object.userData.ring.scale.setScalar(1 + 0.15 * Math.sin(tijd * 8));
+            if (zObj > -3 && !opdr.nu) { opdr.nu = true; opdr.nuT = ot; zetWolk('Nu pakken!', '#EB69BB'); toon(990, 0.1); }
+            const det = () => ({ afstand: +opdr.afst.toFixed(3), hoogte: +opdr.hoogte.toFixed(3), dichtst: +opdr.dichtst.toFixed(3), hoofdOpzij: +(opdr.kant * lat).toFixed(3), niveau: opdr.niveau });
+            if (zObj > -3.5 && d < 0.16) { opdr.reactie = Math.max(0, ot - (opdr.nuT ?? ot)); opdr.detail = det(); pakVaantje(object); gelukt(); }
+            else if (zObj >= 0.8) { opdr.detail = det(); mislukt(); }
+          } else if (opdr.id === 'haas') {
+            // de haas schaatst met vaste snelheid; ga harder dan hij om hem in te halen
+            opdr.gap = Math.min(14, opdr.gap - (v - opdr.vH) * dt); opdr.minGap = Math.min(opdr.minGap ?? 99, opdr.gap);
+            const det = () => ({ snelheidHaas: opdr.vH, kleinsteAfstand: +Math.max(0, opdr.minGap).toFixed(1), niveau: opdr.niveau });
+            if (opdr.gap < 0.3) { opdr.reactie = ot; opdr.detail = det(); gelukt(); }
+            else if (ot > 25) { opdr.detail = det(); mislukt(); }
+            else if (ot > 2) zetWolk(opdr.gap > 6 ? 'Schaats harder! Links… rechts…' : `Nog ${Math.ceil(opdr.gap)} meter! Door!`, '#EB69BB');
           } else {
             if (zObj > -2.5 && !opdr.nu) { opdr.nu = true; opdr.nuT = ot; zetWolk(opdr.id === 'wak' ? 'Nu opzij!' : 'Nu bukken!', '#EB69BB'); toon(990, 0.1); }
             if (zObj > -1.5 && zObj < 0.6) {   // het object is vlak bij je: nu moet het gebeuren
-              if (opdr.id === 'wak') opdr.maxOpzij = Math.max(opdr.maxOpzij || 0, -lat);
-              const ok = opdr.id === 'wak' ? -lat > opdr.drempel : daalRel > D.knie;
+              if (opdr.id === 'wak') opdr.maxOpzij = Math.max(opdr.maxOpzij || 0, opdr.kant * lat);
+              if (opdr.id === 'brug') opdr.maxBuk = Math.max(opdr.maxBuk || 0, daalRel);
+              const ok = opdr.id === 'wak' ? opdr.kant * lat > opdr.drempel : daalRel > opdr.drempel;
               if (ok) { opdr.hold += dt; if (opdr.reactie === undefined) opdr.reactie = Math.max(0, ot - (opdr.nuT ?? ot)); }   // reactietijd vanaf 'Nu …!'
             }
-            if (zObj >= 0.6) { if (opdr.id === 'wak') opdr.detail = { stap: +(opdr.maxOpzij || 0).toFixed(3), drempel: opdr.drempel, niveau: opdr.niveau }; (opdr.hold >= (opdr.id === 'wak' ? D.stapTijd : D.knieTijd)) ? gelukt() : mislukt(); }   // pas oordelen als het voorbij is
+            if (zObj >= 0.6) { if (opdr.id === 'wak') opdr.detail = { stap: +(opdr.maxOpzij || 0).toFixed(3), drempel: opdr.drempel, niveau: opdr.niveau }; if (opdr.id === 'brug') opdr.detail = { buk: +(opdr.maxBuk || 0).toFixed(3), drempel: opdr.drempel, niveau: opdr.niveau }; (opdr.hold >= (opdr.id === 'wak' ? D.stapTijd : D.knieTijd)) ? gelukt() : mislukt(); }   // pas oordelen als het voorbij is
           }
+        }
+        if (opdr.id === 'haas' && object) {
+          object.position.set(0.45 + bochtX(2.6 + opdr.gap), 0, -(2.6 + opdr.gap));
+          poseerFiguur(object, { s: Math.sin(tijd * 2.4), hurk: 0.65 }, tijd);
         }
         if (opdr.klaar) {
           doelPose.juich = opdr.gelukt && ot - opdr.klaarT < 2 ? 1 : 0;
-          if (opdr.id === 'wak' && opdr.gelukt && -lat > 0.12 && ot - opdr.klaarT > 1.5) zetWolk('Kom maar weer terug naar het midden');
+          if (opdr.id === 'wak' && opdr.gelukt && opdr.kant * lat > 0.12 && ot - opdr.klaarT > 1.5) zetWolk('Kom maar weer terug naar het midden');
+          if (opdr.id === 'splits' && ot - opdr.klaarT < 1.5) doelPose.reik = opdr.keuze;   // het maatje volgt jouw aanwijzing
+          if (opdr.id === 'bocht' && opdr.vObj) { opdr.vZ += v * dt; opdr.vObj.position.set(bochtX(-opdr.vZ), 0, opdr.vZ); }
           let klaarVoorVolgende = ot - opdr.klaarT > 3 && ot > NADER + 2;
+          if (opdr.id === 'haas') { opdr.gap -= (v - opdr.vH * 0.7) * dt; klaarVoorVolgende = opdr.gap < -3 || ot - opdr.klaarT > 5; }
           if (opdr.id === 'bocht') zetBalk(ot - opdr.klaarT < 1 && opdr.gelukt ? 1 : null);
           if (opdr.id === 'splits') {
             // na je keuze buigt de hele baan voorbij de punt mee de gekozen baan in; daarna volgt meteen een bocht
@@ -1487,9 +1661,10 @@ function update(p, q, frame, ref, dt) {
             const doorNaarBocht = OPDRACHTEN[opdrIndex + 1] && OPDRACHTEN[opdrIndex + 1].naSplits;
             if (opdr.id === 'bocht') routeHerinner = null;
             if (opdr.id === 'splits') { if (vork) wereld.remove(vork); vork = object; vork.userData.cg = vork.userData.c; object = null; }   // de splitsing schuift nog even voorbij
+            if (opdr.vObj) wereld.remove(opdr.vObj);
             toonResultaten(); plaatsObject(null); kaart.visible = false; kaartStaat = null; zetBalk(null); opdr = null; opdrIndex++;
             if (doorNaarBocht) volgendeT = ritT;   // de baan buigt gewoon door: geen pauze, wolkje blijft staan
-            else { bochtK = 0; bochtD0 = 0; bochtS = 0; zetWolk(null); volgendeT = ritT + D.pauzeTussen; }
+            else { bochtK = 0; bochtD0 = 0; bochtS = 0; zetWolk(null); volgendeT = ritT + (E.pauze ?? D.pauzeTussen); }
           }
         }
       } else {
@@ -1579,10 +1754,17 @@ function update(p, q, frame, ref, dt) {
   else { const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); wolk.position.set(p.x + f.x * 2.2, p.y + 0.05, p.z + f.z * 2.2); }
   wolk.lookAt(p.x, wolk.position.y, p.z);
   if (balk.visible) { balk.position.copy(wolk.position); balk.position.y -= 0.27; balk.quaternion.copy(wolk.quaternion); }
+  nivBord.visible = tijd - nivT < 2.8;
+  if (nivBord.visible) { nivBord.position.copy(wolk.position); nivBord.position.y -= balk.visible ? 0.37 : 0.28; nivBord.quaternion.copy(wolk.quaternion); nivBord.material.opacity = Math.min(1, (2.8 - (tijd - nivT)) * 2); }
+  if (base && Math.floor(tijd * 2) !== Math.floor((tijd - dt) * 2)) {
+    if (fase === 'rit') { const r = restTijd(); tekenVoortgang(ritT / (ritT + r), r); }
+    else if (fase === 'einde') tekenVoortgang(1, null, 'Gefinisht!');
+    else tekenVoortgang(0, null, `Etappe ${E.nr}`);
+  }
   if (base) {
     if (Math.floor(tijd * 4) !== Math.floor((tijd - dt) * 4)) {
       const opdrNr = Math.min(opdrIndex + (opdr ? 1 : 0), OPDRACHTEN.length);
-      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : opdr && opdr.id === 'stempel' && !opdr.klaar ? `stempelpost ${opdr.stad}` : opdr && opdr.id === 'bocht' && !opdr.klaar ? (opdr.richting < 0 ? 'bocht naar links' : 'bocht naar rechts') : opdr && opdr.id === 'splits' && !opdr.klaar ? 'welke kant?' : `opdracht ${opdrNr}/${OPDRACHTEN.length} · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : `etappe ${E.nr}`);
+      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : opdr && opdr.id === 'stempel' && !opdr.klaar ? `stempelpost ${opdr.stad}` : opdr && opdr.id === 'bocht' && !opdr.klaar ? (opdr.richting < 0 ? 'bocht naar links' : 'bocht naar rechts') : opdr && opdr.id === 'splits' && !opdr.klaar ? 'welke kant?' : opdr && opdr.id === 'haas' && !opdr.klaar ? `haas: ${Math.max(0, Math.round(opdr.gap))} m · ${Math.round(v * 3.6)} km/u` : `opdracht ${opdrNr}/${OPDRACHTEN.length} · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : `etappe ${E.nr}`);
     }
   }
 }
@@ -1602,11 +1784,14 @@ function voorbeeld(t) {
     const o = VB.get('opdr');
     if (o === 'splits') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); object.userData.dDiv = +(VB.get('d') || 3); }
     else if (o === 'splitsbocht') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); const u = object.userData; u.dDiv = +(VB.get('d') || 2); u.c = u.cg = 1; bochtK = D.splitsK; bochtD0 = Math.max(0, u.dDiv); }
+    else if (o === 'publiek') { plaatsObject(maakVaantje(1, 0.85, 1.1)); }
+    else if (o === 'haas') { plaatsObject(maakHaas()); object.userData.vbHaas = true; }
+    else if (o === 'wak-rechts') plaatsObject(maakWak(1));
     else if (o === 'kruisje') { kruisje.visible = true; kruisje.position.set(0, 1.5, -0.6); kruisje.scale.setScalar(1); }
     else if (o === 'bocht' || o === 'bocht-rechts') { const r = o === 'bocht' ? -1 : 1; plaatsObject(maakBochtBorden(r)); bochtK = r * D.bochtK; bochtD0 = 3; }
     else if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.95 : 1.05, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
     else if (o === 'wak') plaatsObject(maakWak()); else if (o === 'brug') plaatsObject(maakBrug(1.69)); else if (o === 'wind') plaatsObject(maakWind()); else if (o === 'finish') plaatsObject(maakFinish());
-    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? 0 : -5;
+    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? 0 : object.userData.vaantjeGroep ? -1.8 : -5;
     if (o && o.startsWith('bocht')) zetBalk(0.6);
     const opd = o === 'stempel-links' ? OPDRACHTEN.find(x => x.stad === 'IJlst') : o === 'bocht-rechts' ? OPDRACHTEN.find(x => x.richting === 1) : OPDRACHTEN.find(x => x.id === o);
     zetWolk(o === 'splits' ? 'Welke kant? Stap!' : opd ? opd.aankondiging : o === 'finish' ? 'De finish komt eraan!' : 'Lekker tempo!');
@@ -1617,6 +1802,7 @@ function voorbeeld(t) {
   maatje.position.x += bochtX(2.6); maatjeSchaduw.position.x = maatje.position.x;
   if (object && object.userData.bocht) { object.userData.scroll += vv * dt; zetBochtBorden(object); }
   if (object && object.userData.splits) zetVork(object);
+  if (object && object.userData.vbHaas) { object.position.set(0.45, 0, -5); poseerFiguur(object, { s: Math.sin(ts * 2.4), hurk: 0.65 }, ts); }
   if (object && object.userData.publiek) for (const p of object.userData.publiek) zetToeschouwer(p, ts, true);
   if (o === 'kruisje') kruisje.rotation.y = Math.sin(ts * 1.3) * 0.5;
   wapperVlaggen(ts); updateDecor(dt, vv, ts); updateSneeuw(dt, vv, ts);
@@ -1632,6 +1818,7 @@ function voorbeeld(t) {
   wereld.updateMatrixWorld(); wolk.position.copy(wereld.localToWorld(new THREE.Vector3(maatje.position.x, base.wolkY, -2.6))); wolk.lookAt(0, wolk.position.y, 0);
   if (balk.visible) { balk.position.copy(wolk.position); balk.position.y -= 0.27; balk.quaternion.copy(wolk.quaternion); }
   tekenBord('120 m', `opdracht 1/${OPDRACHTEN.length} · 9 km/u`);
+  if (!vbT || Math.floor(ts) !== Math.floor(ts - dt)) tekenVoortgang(0.42, 128);
 }
 
 renderer.setAnimationLoop((t, frame) => {
@@ -1652,9 +1839,13 @@ renderer.setAnimationLoop((t, frame) => {
 function detailTekst(d) {
   if (!d) return '';
   const cm = x => Math.round(x * 100) + ' cm';
-  if (d.keuze !== undefined) return (d.keuze === 'te laat' ? `te laat · goed was ${d.juisteKant}` : `koos ${d.kant} (${d.gekozen}) · ${d.keuze}`) + (d.bedenktijd ? ` · ${d.bedenktijd} s bedenktijd` : '');
-  if (d.maxLeun !== undefined) return `meest geleund ${cm(d.maxLeun)} · gemiddeld ${cm(d.gemLeun)}` + (d.drempel ? ` · drempel ${cm(d.drempel)}` : '');
+  if (d.keuze !== undefined) return (d.keuze === 'te laat' ? `te laat · goed was ${d.juisteKant}` : `koos ${d.kant} (${d.gekozen}) · ${d.keuze}`) + (d.bedenktijd ? ` · ${d.bedenktijd} s bedenktijd` : '') + (d.hoe === 'stap' ? ' · gestapt' : '');
+  if (d.maxLeun !== undefined) return `meest geleund ${cm(d.maxLeun)} · gemiddeld ${cm(d.gemLeun)}` + (d.drempel ? ` · drempel ${cm(d.drempel)}` : '') + (d.vaantje !== undefined ? (d.vaantje ? ' · vaantje ✓' : ' · vaantje ✗') : '');
   if (d.stap !== undefined) return `stap ${cm(d.stap)} · drempel ${cm(d.drempel)}`;
+  if (d.buk !== undefined) return `gebukt ${cm(d.buk)} · drempel ${cm(d.drempel)}`;
+  if (d.afstand !== undefined) return `vaantje ${cm(d.afstand)} opzij, ${cm(d.hoogte)} hoog · hand ${cm(d.dichtst)} ervan`;
+  if (d.snelheidHaas !== undefined) return `haas ${Math.round(d.snelheidHaas * 3.6)} km/u · kleinste afstand ${d.kleinsteAfstand} m`;
+  if (d.vasthouden !== undefined) return `${d.vasthouden} s handen op je rug`;
   if (d.hand) return `${d.hand}e hand · vak ${cm(d.doelOpzij)} opzij, ${cm(d.tafelHoogte)} hoog · hoofd ${cm(d.hoofdOpzij)} mee`;
   if (d.dichtst !== undefined) return `dichtstbij: ${cm(d.dichtst)} van het vak`;
   return '';
@@ -1707,6 +1898,8 @@ startKnop.addEventListener('click', async () => {
     base = null; anker = null; stilT = 0; fase = 'opstellen'; faseT = 0; v = 0; afstand = 0; slagen = 0; kant = 0;
     opdr = null; opdrIndex = 0; volgendeT = 0; reikAfst = null; kaartStaat = null; kaart.visible = false; bochtK = 0; bochtD0 = 0; zetBalk(null); resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
     kal = null; niveau = {}; reeks = {}; laadEtappe(+kiesEtappe.value);
+    for (const c of [...wereld.children]) if (c.userData.vaantjeGroep) wereld.remove(c);
+    toonTijd = document.getElementById('optTijd').checked;
     lijfAan = document.getElementById('optLijf').checked; sneeuw.visible = document.getElementById('optSneeuw').checked; kruisje.visible = false; bochtS = 0;
     zetWolk('Sta even stil en kijk recht vooruit');
     await renderer.xr.setSession(sessie);
