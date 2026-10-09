@@ -873,7 +873,7 @@ function tekenWijsVlak(m, naam, vul, tijd, staat) {
 }
 function plaatsWijsVlakken(p) {
   const r = new THREE.Vector3(base.rechts.x, 0, base.rechts.y), f = new THREE.Vector3(base.vooruit.x, 0, base.vooruit.y);
-  for (const m of wijsVlak) { m.position.set(p.x, p.y - 0.15, p.z).addScaledVector(r, m.userData.k * 0.55).addScaledVector(f, 0.3); m.lookAt(p.x, p.y - 0.15, p.z); m.visible = true; m.userData.sleutel = ''; }
+  for (const m of wijsVlak) { m.position.set(p.x, p.y - 0.12, p.z).addScaledVector(r, m.userData.k * 0.5).addScaledVector(f, 0.5); m.lookAt(p.x, p.y - 0.15, p.z); m.visible = true; m.userData.sleutel = ''; }
 }
 
 // ---------- Zwevende snelheidsmeter rechtsonder ----------
@@ -1108,7 +1108,7 @@ function maakFeest(nr) {
     const c2 = maakCameraploeg(1); c2.position.set(1.4, 0, -2.2); g.add(c2);
     for (let i = 0; i < 6; i++) {   // grote vlaggen
       const kant = i % 2 ? 1 : -1, x = kant * (3.2 + (i % 3) * 0.3), z = -2.8 + i * 0.6;
-      g.add(Object.assign(new THREE.Mesh(bouw([staaf([0, 0, 0], [0, 2.8, 0], 0.025, 0.02, '#e8e2d4', 6)]), vcMat), { position: new THREE.Vector3(x, 0, z) }));
+      const mast = new THREE.Mesh(bouw([staaf([0, 0, 0], [0, 2.8, 0], 0.025, 0.02, '#e8e2d4', 6)]), vcMat); mast.position.set(x, 0, z); g.add(mast);
       const vl = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[i % 2], side: THREE.DoubleSide })); vl.scale.setScalar(3.2); vl.position.set(x, 2.55, z); g.add(vl); g.userData.vlaggen.push(vl);
     }
   }
