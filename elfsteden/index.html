@@ -41,7 +41,7 @@
       <li>Kies een etappe en druk op Start. Sta ontspannen en kijk recht vooruit; na 3 seconden stilstaan verschijnt de ijsbaan.</li>
       <li><b>Schaatsen</b> = gewicht naar links en rechts verplaatsen. Hoe meer slagen, hoe harder je gaat.</li>
       <li>Eerst een korte <b>meting</b>: hoe ver je leunt en reikt. Daarna past het spel zich aan jou aan: gaat het goed, dan wordt het een stapje zwaarder.</li>
-      <li>Elke etappe duurt 3–4 minuten. Na de finish knijp je om door te gaan naar de volgende etappe. Ga je zitten, dan pauzeert de rit.</li>
+      <li>Elke etappe duurt 3–4 minuten. Na de finish kies je in een zwevend menu: nog een keer of door naar de volgende etappe (tik met je vinger op de knop, of wijs en knijp). Ga je zitten, dan pauzeert de rit.</li>
     </ol>
   </div>
   <div class="vak">
@@ -57,12 +57,12 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.11</div>
+  <div id="versie">versie 0.12</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.11';
+const VERSIE = '0.12';
 
 // ---------- Instellingen ----------
 const D = {
@@ -1009,7 +1009,7 @@ function updateHanden(frame, ref) {
       const duim = pos['thumb-tip'] || pos['index-finger-tip'];
       const mid = pos['index-finger-tip'].clone().add(duim).multiplyScalar(0.5);
       const richting = mid.clone().sub(pos.wrist).normalize();
-      info[kant] = { kaartPos: mid.addScaledVector(richting, 0.04), kaartQ: polsQ.clone().multiply(kaartPlat), pols: pos.wrist };
+      info[kant] = { kaartPos: mid.addScaledVector(richting, 0.04), kaartQ: polsQ.clone().multiply(kaartPlat), pols: pos.wrist, tip: pos['index-finger-tip'] };
     } else if (bron.gripSpace) {
       const gp = frame.getPose(bron.gripSpace, ref);
       if (gp && !gp.emulatedPosition) {
@@ -1119,6 +1119,72 @@ function startIjsGeluid() {   // zacht krassend ijs; volume volgt de snelheid
   const gn = audio.createGain(); gn.gain.value = 0;
   bron.connect(filter).connect(gn).connect(audio.destination); bron.start();
   ijsGeluid = gn;
+}
+
+// ---------- Zwevend menu na de finish: aantikken met je vinger of aanwijzen en knijpen ----------
+const menu = new THREE.Group(); menu.visible = false; scene.add(menu);
+function knopTekenen(k) {
+  const u = k.userData, c = u.canvas.getContext('2d'), w = u.canvas.width, h = u.canvas.height;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = u.uit ? '#4a4f57' : u.hover ? u.kleurAan : u.kleur; c.beginPath(); c.roundRect(6, 6, w - 12, h - 12, 34); c.fill();
+  c.strokeStyle = u.hover ? '#F6F01D' : '#ffffff'; c.lineWidth = u.hover ? 14 : 8; c.stroke();
+  c.fillStyle = '#ffffff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.font = `bold ${u.sub ? 60 : 64}px system-ui, sans-serif`; c.fillText(u.tekst, w / 2, u.sub ? h * 0.38 : h / 2 + 2);
+  if (u.sub) { c.font = '40px system-ui, sans-serif'; c.fillText(u.sub, w / 2, h * 0.72); }
+  u.tex.needsUpdate = true;
+}
+function maakKnop(id, x, y, bw, bh, kleur, kleurAan) {
+  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = Math.round(512 * bh / bw);
+  const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.set(x, y, 0); m.renderOrder = 12;
+  m.userData = { id, w: bw, h: bh, canvas, tex, kleur, kleurAan, tekst: '', sub: '', hover: false, uit: false };
+  menu.add(m); return m;
+}
+const knoppen = [
+  maakKnop('opnieuw', -0.17, 0, 0.3, 0.13, '#215C9A', '#2f7bd0'),
+  maakKnop('volgende', 0.17, 0, 0.3, 0.13, '#2e8b57', '#3cb371'),
+  maakKnop('stop', 0, -0.13, 0.2, 0.07, '#662A88', '#8a3cb5')
+];
+let menuT = 0, selectBronnen = [];
+const _ray = new THREE.Raycaster();
+function toonMenu(p, q) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; f.normalize();
+  menu.position.set(p.x + f.x * 0.48, p.y - 0.32, p.z + f.z * 0.48); menu.lookAt(p.x, p.y - 0.15, p.z);
+  const volgende = ETAPPES[E.nr] && ETAPPES[E.nr].opdrachten ? ETAPPES[E.nr] : null;
+  const [kOpn, kVlg, kStop] = knoppen;
+  Object.assign(kOpn.userData, { tekst: 'Nog een keer', sub: `etappe ${E.nr}`, uit: false });
+  Object.assign(kVlg.userData, volgende ? { tekst: 'Volgende ▶', sub: `${volgende.van} – ${volgende.naar}`, uit: false } : { tekst: 'Volgende', sub: 'nog niet klaar', uit: true });
+  Object.assign(kStop.userData, { tekst: 'Stoppen', sub: '', uit: false });
+  knoppen.forEach(k => { k.userData.hover = false; knopTekenen(k); });
+  menu.visible = true; menuT = 0;
+}
+// geeft het id van de aangeklikte knop terug (of null)
+function updateMenu(handInfo, frame, ref, dt) {
+  if (!menu.visible) return null;
+  menuT += dt;
+  menu.updateMatrixWorld(true);
+  const hover = new Set(); let gekozen = null;
+  // 1. aantikken met je wijsvinger
+  for (const k of ['left', 'right']) {
+    const tip = handInfo[k] && handInfo[k].tip; if (!tip) continue;
+    for (const kn of knoppen) {
+      const l = kn.worldToLocal(tip.clone()), u = kn.userData;
+      if (Math.abs(l.x) < u.w / 2 + 0.01 && Math.abs(l.y) < u.h / 2 + 0.01 && l.z < 0.08 && l.z > -0.1) { hover.add(kn); if (l.z < 0.012) gekozen = gekozen || kn; }
+    }
+  }
+  // 2. aanwijzen met de straal van je hand of controller, knijpen = kiezen
+  if (frame) for (const bron of frame.session.inputSources) {
+    const rp = bron.targetRaySpace && frame.getPose(bron.targetRaySpace, ref); if (!rp) continue;
+    const t = rp.transform.position, o = rp.transform.orientation;
+    _ray.set(new THREE.Vector3(t.x, t.y, t.z), new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(o.x, o.y, o.z, o.w)));
+    const hit = _ray.intersectObjects(knoppen, false)[0];
+    if (hit) { hover.add(hit.object); if (selectBronnen.includes(bron)) gekozen = gekozen || hit.object; }
+  }
+  selectBronnen = [];
+  for (const kn of knoppen) { const h = hover.has(kn) && !kn.userData.uit; if (h !== kn.userData.hover) { kn.userData.hover = h; knopTekenen(kn); } }
+  if (menuT < 1 || !gekozen || gekozen.userData.uit) return null;   // eerst even rustig kijken
+  return gekozen.userData.id;
 }
 
 // ---------- Status ----------
@@ -1455,11 +1521,15 @@ function update(p, q, frame, ref, dt) {
     case 'einde':
       doelPose.juich = 1; doelPose.draai = faseT > 1 ? 1 : 0;
       {
-        const volgende = ETAPPES[E.nr] && ETAPPES[E.nr].opdrachten ? ETAPPES[E.nr] : null;
-        if (faseT > 5) zetWolk(volgende ? `Knijp voor etappe ${volgende.nr}: ${volgende.van} – ${volgende.naar}` : 'Dit was de laatste etappe voor nu. Knijp om hem nog eens te rijden.');
-        if (knijp && faseT > 2) {
-          knijp = false; plaatsObject(null); laadEtappe(volgende ? volgende.nr : E.nr); kiesEtappe.value = E.nr;
-          fase = 'uitleg'; stap = 3; faseT = 0; bochtK = 0; bochtD0 = 0; bochtS = 0; if (vork) { wereld.remove(vork); vork = null; }
+        if (faseT > 4 && !menu.visible) { toonMenu(p, q); zetWolk('Kies: nog een keer of verder?', '#F6F01D'); }
+        const keuze = updateMenu(handInfo, frame, ref, dt);
+        if (keuze) {
+          menu.visible = false; geluid.wolk(); gebeurtenis('menu', { keuze });
+          if (keuze === 'stop') { const ses = renderer.xr.getSession(); if (ses) ses.end(); }
+          else {
+            plaatsObject(null); laadEtappe(keuze === 'volgende' ? E.nr + 1 : E.nr); kiesEtappe.value = E.nr;
+            fase = 'uitleg'; stap = 3; faseT = 0; bochtK = 0; bochtD0 = 0; bochtS = 0; if (vork) { wereld.remove(vork); vork = null; }
+          }
         }
       }
       break;
@@ -1494,11 +1564,12 @@ function update(p, q, frame, ref, dt) {
   updateLijf(p, q, { left: handInfo.left && handInfo.left.pols, right: handInfo.right && handInfo.right.pols }, lat, dt);
   // het Elfstedenkruisje zweeft voor je bij de finish
   const beloning = E.nr === 11 ? kruisje : kaart, toonBeloning = fase === 'einde' && faseT > 1.2;
+  if (fase !== 'einde') menu.visible = false;
   kruisje.visible = toonBeloning && E.nr === 11;
   if (toonBeloning) {
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; f.normalize();
     beloning.visible = true;
-    beloning.position.set(p.x + f.x * 0.55, p.y - 0.18 + 0.02 * Math.sin(tijd * 2), p.z + f.z * 0.55);
+    beloning.position.set(p.x + f.x * 0.6, p.y - 0.02 + 0.02 * Math.sin(tijd * 2), p.z + f.z * 0.6);
     beloning.rotation.set(0, Math.atan2(-f.x, -f.z) + Math.sin(tijd * 1.3) * 0.4, 0);
     beloning.scale.setScalar(Math.min(1, (faseT - 1.2) * 2) * (beloning === kaart ? 1.6 : 1));
   } else if (fase === 'uitleg' || fase === 'meting') { kaart.visible = false; kaart.scale.setScalar(1); }
@@ -1625,10 +1696,10 @@ startKnop.addEventListener('click', async () => {
   try {
     if (!audio) audio = new AudioContext();
     const sessie = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
-    sessie.addEventListener('select', () => { knijp = true; });
+    sessie.addEventListener('select', (e) => { knijp = true; selectBronnen.push(e.inputSource); });
     sessie.addEventListener('end', () => {
       vorigeT = null; wereld.visible = false; plaatsObject(null); zetWolk(null); kaart.visible = false; for (const k in handVis) handVis[k].g.visible = false;
-      lijf.visible = lijfSchaduw.visible = kruisje.visible = false;
+      lijf.visible = lijfSchaduw.visible = kruisje.visible = menu.visible = false;
       if (ijsGeluid) ijsGeluid.gain.value = 0;
       startKnop.textContent = 'Opnieuw starten'; downloadKnop.hidden = log.length === 0;
       status.textContent = resultaten.length || ritten.length ? 'Resultaten:' : '';
@@ -1642,7 +1713,7 @@ startKnop.addEventListener('click', async () => {
     status.textContent = '';
   } catch (e) { status.textContent = 'Starten mislukt: ' + e.message; }
 });
-window.ixbalance = { get fase() { return fase; }, get v() { return v; }, get resultaten() { return resultaten; }, get opdr() { return opdr; }, get object() { return object; }, get ritT() { return ritT; }, get wolk() { return wolkTekst; }, get kaartStaat() { return kaartStaat; }, kaart, get gebeurtenissen() { return gebeurtenissen; }, D, get OPDRACHTEN() { return OPDRACHTEN; }, get E() { return E; }, get niveau() { return niveau; }, get kal() { return kal; }, laadEtappe, wereld, _update: update, THREE };   // _update: voor testen zonder headset
+window.ixbalance = { get fase() { return fase; }, get v() { return v; }, get resultaten() { return resultaten; }, get opdr() { return opdr; }, get object() { return object; }, get ritT() { return ritT; }, get wolk() { return wolkTekst; }, get kaartStaat() { return kaartStaat; }, kaart, get gebeurtenissen() { return gebeurtenissen; }, D, get OPDRACHTEN() { return OPDRACHTEN; }, get E() { return E; }, get niveau() { return niveau; }, get kal() { return kal; }, laadEtappe, menu, knoppen, _select: (b) => selectBronnen.push(b), wereld, _update: update, THREE };   // _update: voor testen zonder headset
 </script>
 </body>
 </html>
