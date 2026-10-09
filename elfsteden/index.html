@@ -38,20 +38,20 @@
       <li>Leg de controllers weg en zet een stoel binnen handbereik.</li>
       <li>Druk op Start, sta ontspannen en kijk recht vooruit. Na 3 seconden stilstaan verschijnt de ijsbaan.</li>
       <li><b>Schaatsen</b> = gewicht naar links en rechts verplaatsen. Hoe meer slagen, hoe harder je gaat.</li>
-      <li>Onderweg: een <b>wak</b> (stap opzij), twee <b>stempelposten</b> (leg je stempelkaart op de tafel van het kraampje), een <b>lage brug</b> (door de knieën) en <b>tegenwind</b> (handen op de rug).</li>
-      <li>Ga je zitten, dan pauzeert de rit. Duur: ongeveer 2,5 minuut.</li>
+      <li>Onderweg: een <b>wak</b> (stap opzij), twee <b>stempelposten</b> (leg je stempelkaart op de tafel van het kraampje), twee <b>bochten</b> (leun mee de bocht in), een <b>lage brug</b> (door de knieën) en <b>tegenwind</b> (handen op de rug).</li>
+      <li>Ga je zitten, dan pauzeert de rit. Duur: ongeveer 3 minuten.</li>
     </ol>
   </div>
   <button id="start" disabled>Even geduld…</button>
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.5</div>
+  <div id="versie">versie 0.6</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.5';
+const VERSIE = '0.6';
 
 // ---------- Instellingen ----------
 const D = {
@@ -70,17 +70,24 @@ const D = {
   vakBoven: 0.12,        // en niet hoger dan 12 cm boven de tafel
   legTijd: 0.25,         // zo lang op het vak houden = gelegd
   stempelMax: 15,        // na zoveel seconden bij de post: door naar de volgende
-  pauzeTussen: 6         // minimaal zoveel seconden tussen twee opdrachten
+  pauzeTussen: 6,        // minimaal zoveel seconden tussen twee opdrachten
+  // bocht: de baan buigt vóór je af; leun mee de bocht in en houd dat vast
+  bochtK: 0.035,         // kromming van de baan (hoe sterk hij afbuigt)
+  bochtLeun: 0.10,       // hoofd minstens 10 cm opzij naar de binnenkant van de bocht
+  bochtTijd: 2.5,        // zo lang (aaneengesloten, korte dipjes mogen) vasthouden
+  bochtDuur: 8           // zo lang duurt de bocht
 };
 // opdrachten tijdens de rit (tijd in seconden na de start van de rit)
 const OPDRACHTEN = [
   { id: 'wak',  t: 14, naam: 'Wak',        aankondiging: 'Een wak! Stap opzij naar links', goed: 'Goed ontweken!', mis: 'Oei, natte voeten!' },
-  { id: 'stempel', t: 32, kant: 1, reik: 0.50, stad: 'Sneek', naam: 'Stempel Sneek (rechts)', aankondiging: 'Stempelpost Sneek! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, door naar de volgende post' },
-  { id: 'brug', t: 56, naam: 'Lage brug',  aankondiging: 'Lage brug! Door je knieën',     goed: 'Mooi gebukt!',   mis: 'Bijna! Volgende keer lager' },
-  { id: 'stempel', t: 76, kant: -1, reik: 0.57, stad: 'IJlst', naam: 'Stempel IJlst (links)', aankondiging: 'Stempelpost IJlst! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, we gaan verder' },
-  { id: 'wind', t: 100, naam: 'Tegenwind',  aankondiging: 'Tegenwind! Handen op je rug',    goed: 'Lekker gestroomlijnd!', mis: 'Volgende keer handen op je rug' }
+  { id: 'stempel', t: 32, kant: 1, reik: 0.58, stad: 'Sneek', naam: 'Stempel Sneek (rechts)', aankondiging: 'Stempelpost Sneek! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, door naar de volgende post' },
+  { id: 'bocht', t: 56, richting: -1, naam: 'Bocht naar links', aankondiging: 'Bocht naar links! Leun straks mee naar links', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' },
+  { id: 'brug', t: 76, naam: 'Lage brug',  aankondiging: 'Lage brug! Door je knieën',     goed: 'Mooi gebukt!',   mis: 'Bijna! Volgende keer lager' },
+  { id: 'stempel', t: 96, kant: -1, reik: 0.66, stad: 'IJlst', naam: 'Stempel IJlst (links)', aankondiging: 'Stempelpost IJlst! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, we gaan verder' },
+  { id: 'bocht', t: 118, richting: 1, naam: 'Bocht naar rechts', aankondiging: 'Bocht naar rechts! Leun straks mee naar rechts', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' },
+  { id: 'wind', t: 138, naam: 'Tegenwind',  aankondiging: 'Tegenwind! Handen op je rug',    goed: 'Lekker gestroomlijnd!', mis: 'Volgende keer handen op je rug' }
 ];
-const FINISH_T = 124, NADER = 7, POST_Z = -0.3;   // object komt in 7 s van ver naar jou toe
+const FINISH_T = 160, NADER = 7, POST_Z = -0.3;   // object komt in 7 s van ver naar jou toe
 const K = { paars: 0x662A88, blauw: 0x43BFFD, roze: 0xEB69BB, geel: 0xF6F01D, donker: 0x215C9A };
 
 // ---------- three.js + WebXR ----------
@@ -124,13 +131,17 @@ const ijsTex = canvasTex(256, 512, (g, w, h) => {
   g.fillStyle = 'rgba(120,160,190,0.25)'; g.fillRect(w * 0.49, 0, w * 0.02, h);   // middenlijn
 }, true);
 ijsTex.repeat.set(1, BAAN_L / 2);
-const ijs = new THREE.Mesh(new THREE.PlaneGeometry(2.1, BAAN_L).rotateX(-Math.PI / 2),
+const ijs = new THREE.Mesh(new THREE.PlaneGeometry(2.1, BAAN_L, 1, 60).rotateX(-Math.PI / 2),
   new THREE.MeshBasicMaterial({ map: ijsTex, alphaMap: vervaag, transparent: true, opacity: 0.92, depthWrite: false }));
 ijs.position.set(0, 0.005, -BAAN_L / 2 + 0.9); wereld.add(ijs);
+// bochten: alles vóór je schuift opzij met bochtX(afstand); bij jou zelf (afstand 0) verandert niets
+let bochtK = 0, bochtD0 = 0, bochtVorig = null;
+function bochtX(afst) { const t = Math.max(0, afst - bochtD0); return bochtK * t * t / 2; }
+const buigbaar = [ijs];
 for (const kant of [-1, 1]) {   // sneeuwranden
-  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.6, BAAN_L).rotateX(-Math.PI / 2),
+  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.6, BAAN_L, 1, 60).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap: vervaag, transparent: true, opacity: 0.85, depthWrite: false }));
-  s.position.set(kant * 1.35, 0.004, -BAAN_L / 2 + 0.9); wereld.add(s);
+  s.position.set(kant * 1.35, 0.004, -BAAN_L / 2 + 0.9); wereld.add(s); buigbaar.push(s);
 }
 // paaltjes langs de baan
 const paalGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.5, 8);
@@ -141,7 +152,7 @@ for (let i = 0; i < 10; i++) for (const kant of [-1, 1]) {
   const p = new THREE.Group();
   const stok = new THREE.Mesh(paalGeo, paalMat); stok.position.y = 0.25;
   const kop = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 8), kopMat); kop.position.y = 0.52;
-  p.add(stok, kop); p.position.set(kant * 1.2, 0, -i * 3 - 1.5); wereld.add(p); palen.push(p);
+  p.add(stok, kop); p.position.set(kant * 1.2, 0, -i * 3 - 1.5); p.userData.x0 = kant * 1.2; wereld.add(p); palen.push(p);
 }
 
 // ---------- Maatje ----------
@@ -415,6 +426,49 @@ function kaartHand(info, voorkeur) {
   return null;
 }
 
+function pasBochtToe() {
+  const sleutel = bochtK + '|' + bochtD0;
+  if (sleutel !== bochtVorig) {
+    bochtVorig = sleutel;
+    for (const m of buigbaar) {
+      const pos = m.geometry.attributes.position;
+      if (!m.userData.basis) m.userData.basis = Float32Array.from(pos.array);
+      const b = m.userData.basis;
+      for (let i = 0; i < pos.count; i++) pos.array[i * 3] = b[i * 3] + bochtX(-(b[i * 3 + 2] + m.position.z));
+      pos.needsUpdate = true;
+    }
+  }
+  for (const paal of palen) paal.position.x = paal.userData.x0 + bochtX(-paal.position.z);
+  if (bord.userData.x0 !== undefined) bord.position.x = bord.userData.x0 + bochtX(-bord.position.z);
+}
+// bochtborden (rood-wit, pijlen naar de binnenkant van de bocht) aan de buitenkant
+function maakBochtBorden(richting) {
+  const tex = canvasTex(256, 128, (c, w, h) => {
+    c.fillStyle = '#d62828'; c.fillRect(0, 0, w, h); c.fillStyle = '#ffffff';
+    for (let i = 0; i < 3; i++) { const x = 40 + i * 70; c.beginPath();
+      if (richting < 0) { c.moveTo(x + 40, 14); c.lineTo(x, h / 2); c.lineTo(x + 40, h - 14); c.lineTo(x + 58, h - 14); c.lineTo(x + 18, h / 2); c.lineTo(x + 58, 14); }
+      else { c.moveTo(x, 14); c.lineTo(x + 40, h / 2); c.lineTo(x, h - 14); c.lineTo(x + 18, h - 14); c.lineTo(x + 58, h / 2); c.lineTo(x + 18, 14); }
+      c.fill(); }
+  });
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const b = new THREE.Group();
+    const paal = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 6), paalMat); paal.position.y = 0.45;
+    const plaat = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); plaat.position.y = 0.95;
+    b.add(paal, plaat); g.add(b);
+  }
+  g.userData = { bocht: true, richting, scroll: 0 };
+  return g;
+}
+function zetBochtBorden(g) {
+  const u = g.userData; g.position.z = 0;
+  g.children.forEach((b, i) => {
+    let afst = ((i * 3 + 1.5 - u.scroll) % 12 + 12) % 12 + bochtD0;
+    b.position.set(-u.richting * 1.2 + bochtX(afst), 0, -afst);
+    b.rotation.y = -Math.atan(bochtK * Math.max(0, afst - bochtD0));
+    b.visible = afst < 16;
+  });
+}
 let object = null;
 function plaatsObject(o) { if (object) wereld.remove(object); object = o; if (o) { if (!o.isLineSegments) o.position.z = -14; wereld.add(o); } }
 
@@ -460,7 +514,7 @@ function zetBase(p, q) {
   base = { x: p.x, z: p.z, y: p.y, vooruit, rechts: new THREE.Vector2(-vooruit.y, vooruit.x) };
   wereld.position.set(p.x, 0, p.z); wereld.rotation.y = Math.atan2(-vooruit.x, -vooruit.y); wereld.visible = true;
   base.wolkY = Math.max(p.y + 0.3, 1.95);
-  bord.position.set(1.1, Math.max(p.y - 0.15, 1.1), -2.2); bord.rotation.y = -0.35;
+  bord.position.set(1.1, Math.max(p.y - 0.15, 1.1), -2.2); bord.rotation.y = -0.35; bord.userData.x0 = 1.1;
   gebeurtenis('opgesteld', { y: +p.y.toFixed(3) });
 }
 function handenInBeeld(frame, ref) {
@@ -530,13 +584,13 @@ function update(p, q, frame, ref, dt) {
       // opdracht starten
       if (!opdr && opdrIndex < OPDRACHTEN.length && ritT >= Math.max(OPDRACHTEN[opdrIndex].t, volgendeT)) {
         opdr = { ...OPDRACHTEN[opdrIndex], start: ritT, klaar: false, gelukt: false, hold: 0, terug: false };
-        plaatsObject(opdr.id === 'wak' ? maakWak() : opdr.id === 'brug' ? maakBrug(Math.max(1.0, base.y + 0.02)) : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : maakWind());
+        plaatsObject(opdr.id === 'wak' ? maakWak() : opdr.id === 'brug' ? maakBrug(Math.max(1.0, base.y + 0.02)) : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : opdr.id === 'bocht' ? maakBochtBorden(opdr.richting) : maakWind());
         zetWolk(opdr.aankondiging, '#EB69BB'); geluid.wolk(); gebeurtenis('opdracht', { id: opdr.id });
       }
       if (opdr) {
         const ot = ritT - opdr.start;
         const zObj = -14 + Math.min(ot, NADER + 2) * (14 / NADER);   // 0 = bij jou, maatje staat op -2,6
-        if (opdr.id !== 'wind' && opdr.id !== 'stempel') object.position.z = zObj;
+        if (opdr.id !== 'wind' && opdr.id !== 'stempel' && opdr.id !== 'bocht') object.position.z = zObj;
         // het maatje doet het voor op het moment dat het object bij hém is
         if (opdr.id === 'wak') doelPose.zij = (zObj > -4.2 && zObj < -1.2) ? -0.35 : 0;
         if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
@@ -593,6 +647,27 @@ function update(p, q, frame, ref, dt) {
               if (a >= 0.45 && !opdr.gestempeld) { opdr.gestempeld = true; zetKaart(opdr.stad, true); geluid.bonk(); }
               if (a > 1.3) gelukt();
             }
+          } else if (opdr.id === 'bocht') {
+            // de bocht komt in NADER seconden naar je toe, daarna zit je er middenin
+            const r = opdr.richting;
+            bochtK = r * D.bochtK;
+            if (ot < NADER) { bochtD0 = 14 * (1 - ot / NADER); if (ot > NADER - 2) doelPose.lean = r; }
+            else {
+              bochtD0 = 0;
+              if (!opdr.nu) { opdr.nu = true; opdr.nuT = ot; toon(990, 0.1); }
+              object.userData.scroll += v * dt;
+              const inT = ot - opdr.nuT, leun = r * lat;
+              doelPose.lean = r; doelPose.zij = r * 0.12;
+              opdr.maxLeun = Math.max(opdr.maxLeun || 0, leun); opdr.somLeun = (opdr.somLeun || 0) + leun * dt; opdr.nT = (opdr.nT || 0) + dt;
+              if (leun > D.bochtLeun) { opdr.hold += dt; if (opdr.reactie === undefined) opdr.reactie = inT; }
+              else opdr.hold = Math.max(0, opdr.hold - dt * 2);   // korte dipjes mogen
+              const detail = () => ({ maxLeun: +opdr.maxLeun.toFixed(3), gemLeun: +(opdr.somLeun / opdr.nT).toFixed(3), hoofdOmlaag: +(base.y - p.y).toFixed(3) });
+              if (opdr.hold >= D.bochtTijd) { opdr.detail = detail(); gelukt(); }
+              else if (inT > D.bochtDuur) { opdr.detail = detail(); mislukt(); }
+              else if (leun > D.bochtLeun) zetWolk(`Goed zo! Vasthouden… ${Math.ceil(D.bochtTijd - opdr.hold)}`, '#43BFFD');
+              else zetWolk(r < 0 ? 'Leun naar links!' : 'Leun naar rechts!', '#EB69BB');
+            }
+            zetBochtBorden(object);
           } else if (opdr.id === 'wind') {
             if (ot > 1.5) {
               opdr.hold = handen === 0 ? opdr.hold + dt : 0;
@@ -613,6 +688,10 @@ function update(p, q, frame, ref, dt) {
           doelPose.juich = opdr.gelukt && ot - opdr.klaarT < 2 ? 1 : 0;
           if (opdr.id === 'wak' && opdr.gelukt && -lat > 0.12 && ot - opdr.klaarT > 1.5) zetWolk('Kom maar weer terug naar het midden');
           let klaarVoorVolgende = ot - opdr.klaarT > 3 && ot > NADER + 2;
+          if (opdr.id === 'bocht') {   // de baan wordt weer recht
+            bochtD0 = 0; bochtK = opdr.richting * D.bochtK * Math.max(0, 1 - (ot - opdr.klaarT) / 3);
+            object.userData.scroll += v * dt; zetBochtBorden(object);
+          }
           if (opdr.id === 'stempel') {   // het kraampje blijft staan tot je weer wegschaatst
             reikAfst = null; object.userData.vak.visible = false; object.userData.s = 0;
             object.position.z += v * dt;
@@ -628,7 +707,7 @@ function update(p, q, frame, ref, dt) {
           }
           if (klaarVoorVolgende) {
             resultaten.push({ naam: opdr.naam, gelukt: opdr.gelukt, reactie: opdr.reactie !== undefined ? +opdr.reactie.toFixed(1) : null, ...(opdr.detail ? { detail: opdr.detail } : {}) });
-            toonResultaten(); plaatsObject(null); kaart.visible = false; kaartStaat = null; opdr = null; opdrIndex++; zetWolk(null); volgendeT = ritT + D.pauzeTussen;
+            toonResultaten(); plaatsObject(null); kaart.visible = false; kaartStaat = null; bochtK = 0; bochtD0 = 0; opdr = null; opdrIndex++; zetWolk(null); volgendeT = ritT + D.pauzeTussen;
           }
         }
       } else {
@@ -666,7 +745,8 @@ function update(p, q, frame, ref, dt) {
 
   // snelheid en beweging van de wereld
   const stilstaan = fase === 'pauze' || fase === 'opstellen';
-  v *= Math.exp(-dt / D.remTijd); if (stilstaan) v *= Math.exp(-dt * 3);
+  const inBocht = opdr && opdr.id === 'bocht' && opdr.nu && !opdr.klaar;   // in de bocht houd je je vaart
+  if (!inBocht) v *= Math.exp(-dt / D.remTijd); if (stilstaan) v *= Math.exp(-dt * 3);
   if (fase === 'rit') afstand += v * dt;
   ijsTex.offset.y += v * dt / 2;
   for (const paal of palen) { paal.position.z += v * dt; if (paal.position.z > 1.5) paal.position.z -= 30; }
@@ -677,6 +757,8 @@ function update(p, q, frame, ref, dt) {
   }
   if (ijsGeluid) ijsGeluid.gain.value = Math.min(0.05, v * 0.01);
   poseerMaatje(tijd, doelPose, dt);
+  maatje.position.x += bochtX(2.6);
+  pasBochtToe();
   if (object && object.userData.kraam) zetStempelaar(object);
 
   // wolkje boven het maatje (of voor je tijdens het opstellen), altijd naar je toe gedraaid
@@ -686,7 +768,7 @@ function update(p, q, frame, ref, dt) {
   if (base) {
     if (Math.floor(tijd * 4) !== Math.floor((tijd - dt) * 4)) {
       const opdrNr = Math.min(opdrIndex + (opdr ? 1 : 0), OPDRACHTEN.length);
-      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : opdr && opdr.id === 'stempel' && !opdr.klaar ? `stempelpost ${opdr.stad}` : `opdracht ${opdrNr}/${OPDRACHTEN.length} · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : 'proefrit');
+      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : opdr && opdr.id === 'stempel' && !opdr.klaar ? `stempelpost ${opdr.stad}` : opdr && opdr.id === 'bocht' && !opdr.klaar ? (opdr.richting < 0 ? 'bocht naar links' : 'bocht naar rechts') : `opdracht ${opdrNr}/${OPDRACHTEN.length} · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : 'proefrit');
     }
   }
 }
@@ -702,14 +784,17 @@ function voorbeeld(t) {
     camera.aspect = innerWidth / innerHeight; camera.fov = 75; camera.updateProjectionMatrix();
     camera.position.set(0, 1.67, 0); zetBase({ x: 0, y: 1.67, z: 0 }, new THREE.Quaternion());
     const o = VB.get('opdr');
-    if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.50 : 0.57, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
+    if (o === 'bocht' || o === 'bocht-rechts') { const r = o === 'bocht' ? -1 : 1; plaatsObject(maakBochtBorden(r)); bochtK = r * D.bochtK; bochtD0 = 3; }
+    else if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.58 : 0.66, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
     else if (o === 'wak') plaatsObject(maakWak()); else if (o === 'brug') plaatsObject(maakBrug(1.69)); else if (o === 'wind') plaatsObject(maakWind()); else if (o === 'finish') plaatsObject(maakFinish());
-    if (object && !object.isLineSegments) object.position.z = object.userData.kraam ? -1.6 : -5;
-    const opd = o === 'stempel-links' ? OPDRACHTEN[3] : OPDRACHTEN.find(x => x.id === o);
+    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : -5;
+    const opd = o === 'stempel-links' ? OPDRACHTEN.find(x => x.stad === 'IJlst') : o === 'bocht-rechts' ? OPDRACHTEN.find(x => x.richting === 1) : OPDRACHTEN.find(x => x.id === o);
     zetWolk(opd ? opd.aankondiging : o === 'finish' ? 'De finish komt eraan!' : 'Lekker tempo!');
   }
   const o = VB.get('opdr');
   poseerMaatje(t / 1000, { lean: o ? 0 : Math.sin(t / 1000 * Math.PI * 2 / 1.8), buk: o === 'brug' ? 1 : 0, rug: o === 'wind' ? 1 : 0, juich: 0, zij: o === 'wak' ? -0.35 : 0, reik: o === 'stempel' ? 1 : o === 'stempel-links' ? -1 : 0 }, dt);
+  if (object && object.userData.bocht) { maatje.position.x += bochtX(2.6); object.userData.scroll += 2.5 * dt; zetBochtBorden(object); }
+  pasBochtToe();
   if (object && object.userData.kraam) { object.userData.s = Math.max(0, Math.sin(t / 1000 * 2.5)); zetStempelaar(object); if (VB.has('kaart')) kaartOpTafel(object); }
   ijsTex.offset.y += 2.5 * dt / 2;
   for (const paal of palen) { paal.position.z += 2.5 * dt; if (paal.position.z > 1.5) paal.position.z -= 30; }
@@ -735,6 +820,7 @@ renderer.setAnimationLoop((t, frame) => {
 function detailTekst(d) {
   if (!d) return '';
   const cm = x => Math.round(x * 100) + ' cm';
+  if (d.maxLeun !== undefined) return `meest geleund ${cm(d.maxLeun)} · gemiddeld ${cm(d.gemLeun)}`;
   if (d.hand) return `${d.hand}e hand · vak ${cm(d.doelOpzij)} opzij, ${cm(d.tafelHoogte)} hoog · hoofd ${cm(d.hoofdOpzij)} mee`;
   if (d.dichtst !== undefined) return `dichtstbij: ${cm(d.dichtst)} van het vak`;
   return '';
@@ -779,7 +865,7 @@ startKnop.addEventListener('click', async () => {
       status.textContent = resultaten.length ? 'Resultaten van de proefrit:' : '';
     });
     base = null; anker = null; stilT = 0; fase = 'opstellen'; faseT = 0; v = 0; afstand = 0; slagen = 0; kant = 0;
-    opdr = null; opdrIndex = 0; volgendeT = 0; reikAfst = null; kaartStaat = null; kaart.visible = false; resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
+    opdr = null; opdrIndex = 0; volgendeT = 0; reikAfst = null; kaartStaat = null; kaart.visible = false; bochtK = 0; bochtD0 = 0; resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
     zetWolk('Sta even stil en kijk recht vooruit');
     await renderer.xr.setSession(sessie);
     status.textContent = '';
