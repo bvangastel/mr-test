@@ -13,6 +13,7 @@
   p,li{line-height:1.5;color:var(--zacht)} ol{padding-left:1.3rem}
   .vak{background:var(--kaart);border-radius:14px;padding:12px 14px;margin:1rem 0}
   .vak b{color:var(--tekst)}
+  .opties label{line-height:2;cursor:pointer} .opties input{transform:scale(1.3);margin-right:.6rem}
   button{font:inherit;cursor:pointer;border:0;border-radius:12px}
   #start{font-size:1.5rem;padding:1rem 2.4rem;background:var(--paars);color:#fff;border-bottom:4px solid var(--geel)}
   #start:disabled{background:#4a4f57;border-color:#4a4f57;cursor:default}
@@ -38,20 +39,24 @@
       <li>Leg de controllers weg en zet een stoel binnen handbereik.</li>
       <li>Druk op Start, sta ontspannen en kijk recht vooruit. Na 3 seconden stilstaan verschijnt de ijsbaan.</li>
       <li><b>Schaatsen</b> = gewicht naar links en rechts verplaatsen. Hoe meer slagen, hoe harder je gaat.</li>
-      <li><b>Onthoud de route</b> die je maatje bij de start noemt. Onderweg: een <b>wak</b> (stap opzij), drie <b>splitsingen</b> (stap naar de kant van de stad die nu komt), twee <b>stempelposten</b> (leg je stempelkaart op de tafel) en twee <b>bochten</b> (leun mee; de balk loopt vol).</li>
-      <li>Ga je zitten, dan pauzeert de rit. Duur: ongeveer 3,5 minuut.</li>
+      <li><b>Onthoud de route</b> die je maatje bij de start noemt. Onderweg: een <b>wak</b> (stap opzij), twee oefen<b>bochten</b> (leun mee; de balk loopt vol), drie <b>splitsingen</b> (stap naar de kant van de stad die nu komt, daarna volgt meteen een bocht) en twee <b>stempelposten</b> (leg je stempelkaart op de tafel).</li>
+      <li>Ga je zitten, dan pauzeert de rit. Duur: ongeveer 4 minuten.</li>
     </ol>
+  </div>
+  <div class="vak opties">
+    <label><input type="checkbox" id="optLijf" checked> Eigen lijf tonen (half doorzichtig)</label><br>
+    <label><input type="checkbox" id="optSneeuw" checked> Sneeuwval</label>
   </div>
   <button id="start" disabled>Even geduld…</button>
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.7</div>
+  <div id="versie">versie 0.8</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.7';
+const VERSIE = '0.8';
 
 // ---------- Instellingen ----------
 const D = {
@@ -70,7 +75,7 @@ const D = {
   vakBoven: 0.12,        // en niet hoger dan 12 cm boven de tafel
   legTijd: 0.25,         // zo lang op het vak houden = gelegd
   stempelMax: 15,        // na zoveel seconden bij de post: door naar de volgende
-  pauzeTussen: 6,        // minimaal zoveel seconden tussen twee opdrachten
+  pauzeTussen: 5,        // minimaal zoveel seconden tussen twee opdrachten
   // bocht: de baan buigt vóór je af; leun mee de bocht in en houd dat vast
   bochtK: 0.035,         // kromming van de baan (hoe sterk hij afbuigt)
   bochtLeun: 0.10,       // hoofd minstens 10 cm opzij naar de binnenkant van de bocht
@@ -78,22 +83,27 @@ const D = {
   bochtDuur: 8,          // zo lang duurt de bocht
   // splitsing: route onthouden en met een stap de juiste kant kiezen
   kiesTijd: 3,           // zoveel seconden bedenktijd voordat je bij de splitsing bent
-  splitsK: 0.05,         // hoe sterk de twee banen uit elkaar lopen
+  splitsK: 0.04,         // hoe sterk de twee banen uit elkaar lopen (daarna buigt de baan zo verder)
+  splitsOpzij: 0.55,     // midden van de gekozen baan t.o.v. het midden van de hoofdbaan
   routeTijd: 6           // zo lang toont het maatje de route bij de start
 };
 // opdrachten tijdens de rit (tijd in seconden na de start van de rit)
 const ROUTE = ['Sneek', 'IJlst', 'Sloten'];   // het maatje noemt deze route bij de start: onthouden!
+const bochtNa = (stad) => ({ id: 'bocht', t: 0, naSplits: true, naam: 'Bocht na ' + stad, goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' });
 const OPDRACHTEN = [
-  { id: 'wak',  t: 12, naam: 'Wak',        aankondiging: 'Een wak! Stap opzij naar links', goed: 'Goed ontweken!', mis: 'Oei, natte voeten!' },
-  { id: 'splits', t: 24, stad: 'Sneek', anders: 'Dokkum', naam: 'Splitsing Sneek', aankondiging: 'Een splitsing! Welke stad komt nu?', goed: 'Goed onthouden! Op naar Sneek', mis: 'Oei, verkeerde kant!' },
-  { id: 'stempel', t: 36, kant: 1, reik: 0.58, stad: 'Sneek', naam: 'Stempel Sneek (rechts)', aankondiging: 'Stempelpost Sneek! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, door naar de volgende post' },
-  { id: 'bocht', t: 56, richting: -1, naam: 'Bocht naar links', aankondiging: 'Bocht naar links! Leun straks mee naar links', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' },
-  { id: 'splits', t: 74, stad: 'IJlst', anders: 'Franeker', naam: 'Splitsing IJlst', aankondiging: 'Weer een splitsing! Welke stad komt nu?', goed: 'Goed onthouden! Op naar IJlst', mis: 'Oei, verkeerde kant!' },
-  { id: 'stempel', t: 86, kant: -1, reik: 0.66, stad: 'IJlst', naam: 'Stempel IJlst (links)', aankondiging: 'Stempelpost IJlst! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, we gaan verder' },
-  { id: 'bocht', t: 106, richting: 1, naam: 'Bocht naar rechts', aankondiging: 'Bocht naar rechts! Leun straks mee naar rechts', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' },
-  { id: 'splits', t: 124, stad: 'Sloten', anders: 'Workum', naam: 'Splitsing Sloten', aankondiging: 'Laatste splitsing! Welke stad komt nu?', goed: 'Goed onthouden! Op naar Sloten', mis: 'Oei, verkeerde kant!' }
+  { id: 'wak',  t: 10, naam: 'Wak',        aankondiging: 'Een wak! Stap opzij naar links', goed: 'Goed ontweken!', mis: 'Oei, natte voeten!' },
+  { id: 'bocht', t: 22, richting: -1, naam: 'Bocht naar links', aankondiging: 'Bocht naar links! Leun straks mee naar links', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' },
+  { id: 'bocht', t: 40, richting: 1, naam: 'Bocht naar rechts', aankondiging: 'Bocht naar rechts! Leun straks mee naar rechts', goed: 'Mooi door de bocht!', mis: 'Volgende keer verder meeleunen' },
+  { id: 'splits', t: 58, stad: 'Sneek', anders: 'Dokkum', naam: 'Splitsing Sneek', aankondiging: 'Een splitsing! Welke stad komt nu?', goed: 'Goed onthouden! Op naar Sneek', mis: 'Oei, verkeerde kant!' },
+  bochtNa('Sneek'),
+  { id: 'stempel', t: 0, kant: 1, reik: 0.58, stad: 'Sneek', naam: 'Stempel Sneek (rechts)', aankondiging: 'Stempelpost Sneek! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, door naar de volgende post' },
+  { id: 'splits', t: 0, stad: 'IJlst', anders: 'Franeker', naam: 'Splitsing IJlst', aankondiging: 'Weer een splitsing! Welke stad komt nu?', goed: 'Goed onthouden! Op naar IJlst', mis: 'Oei, verkeerde kant!' },
+  bochtNa('IJlst'),
+  { id: 'stempel', t: 0, kant: -1, reik: 0.66, stad: 'IJlst', naam: 'Stempel IJlst (links)', aankondiging: 'Stempelpost IJlst! We stoppen even', goed: 'Gestempeld! Schaats maar weer verder', mis: 'Geeft niks, we gaan verder' },
+  { id: 'splits', t: 0, stad: 'Sloten', anders: 'Workum', naam: 'Splitsing Sloten', aankondiging: 'Laatste splitsing! Welke stad komt nu?', goed: 'Goed onthouden! Op naar Sloten', mis: 'Oei, verkeerde kant!' },
+  bochtNa('Sloten')
 ];
-const FINISH_T = 140, NADER = 7, POST_Z = -0.3;   // object komt in 7 s van ver naar jou toe
+const FINISH_T = 0, NADER = 7, POST_Z = -0.3;   // object komt in 7 s van ver naar jou toe
 const K = { paars: 0x662A88, blauw: 0x43BFFD, roze: 0xEB69BB, geel: 0xF6F01D, donker: 0x215C9A };
 
 // ---------- three.js + WebXR ----------
@@ -125,79 +135,466 @@ const vervaag = canvasTex(4, 256, (g, w, h) => {
   const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#000'); gr.addColorStop(0.45, '#fff'); gr.addColorStop(1, '#fff');
   g.fillStyle = gr; g.fillRect(0, 0, w, h);
 });
-const BAAN_L = 30;
-// ijs met krassen
-const ijsTex = canvasTex(256, 512, (g, w, h) => {
-  g.fillStyle = '#d6e9f3'; g.fillRect(0, 0, w, h);
-  for (let i = 0; i < 90; i++) {
-    g.strokeStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.5})`; g.lineWidth = 1 + Math.random() * 2;
-    const x = Math.random() * w, y = Math.random() * h, l = 40 + Math.random() * 160;
-    g.beginPath(); g.moveTo(x, y); g.lineTo(x + (Math.random() - 0.5) * 20, y + l); g.stroke();
+// ---------- Gedeelde bouwstenen (licht voor de Quest: toon-materialen, gedeelde geometrieën, samengevoegde decorstukken) ----------
+const toonGrad = (() => { const d = new Uint8Array([95, 175, 255]); const t = new THREE.DataTexture(d, 3, 1, THREE.RedFormat); t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t; })();
+const matCache = {};
+function tm(kleur, extra = {}) {   // toon-materiaal (gedeeld per kleur)
+  const sleutel = kleur + JSON.stringify(extra);
+  if (!matCache[sleutel]) matCache[sleutel] = new THREE.MeshToonMaterial({ color: kleur, gradientMap: toonGrad, ...extra });
+  return matCache[sleutel];
+}
+const vcMat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGrad });   // voor samengevoegde stukken met kleur per hoekpunt
+const G = {
+  bol: new THREE.SphereGeometry(1, 14, 10), bolLaag: new THREE.SphereGeometry(1, 8, 6),
+  halfBol: new THREE.SphereGeometry(1, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+  kegel: new THREE.ConeGeometry(1, 1, 7), cil: new THREE.CylinderGeometry(1, 1, 1, 8), cil6: new THREE.CylinderGeometry(1, 1, 1, 6),
+  doos: new THREE.BoxGeometry(1, 1, 1), caps: (r, l) => new THREE.CapsuleGeometry(r, l, 4, 10)
+};
+// voegt losse stukken samen tot één geometrie met kleuren: [geo, kleur, [x,y,z], [rx,ry,rz], [sx,sy,sz]]
+function bouw(delen) {
+  const stukken = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
+  let n = 0;
+  for (const [geo, kleur, p = [0, 0, 0], r = [0, 0, 0], sc = [1, 1, 1]] of delen) {
+    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    g.applyMatrix4(m.compose(new THREE.Vector3(...p), q.setFromEuler(e.set(...r)), new THREE.Vector3(...(typeof sc === 'number' ? [sc, sc, sc] : sc))));
+    stukken.push([g, c.set(kleur).clone()]); n += g.attributes.position.count;
   }
-  g.fillStyle = 'rgba(120,160,190,0.25)'; g.fillRect(w * 0.49, 0, w * 0.02, h);   // middenlijn
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  let i = 0;
+  for (const [g, k] of stukken) {
+    pos.set(g.attributes.position.array, i * 3); nor.set(g.attributes.normal.array, i * 3);
+    for (let j = 0; j < g.attributes.position.count; j++) col.set([k.r, k.g, k.b], (i + j) * 3);
+    i += g.attributes.position.count; g.dispose();
+  }
+  const uit = new THREE.BufferGeometry();
+  uit.setAttribute('position', new THREE.BufferAttribute(pos, 3)); uit.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); uit.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return uit;
+}
+const BAAN_L = 30;
+// natuurijs: blauwgrijs, met schaatssporen, scheurtjes en ingevroren luchtbelletjes
+const ijsTex = canvasTex(256, 512, (g, w, h) => {
+  const gr = g.createLinearGradient(0, 0, w, 0); gr.addColorStop(0, '#b9d0dc'); gr.addColorStop(0.5, '#d3e5ee'); gr.addColorStop(1, '#b9d0dc');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  for (let i = 0; i < 14; i++) {   // donkere vlekken (zwart ijs)
+    const x = Math.random() * w, y = Math.random() * h, r = 20 + Math.random() * 50;
+    const v = g.createRadialGradient(x, y, 2, x, y, r); v.addColorStop(0, 'rgba(70,105,130,0.22)'); v.addColorStop(1, 'rgba(70,105,130,0)');
+    g.fillStyle = v; g.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+  for (let i = 0; i < 70; i++) {   // schaatssporen: lange, licht gebogen witte lijnen
+    g.strokeStyle = `rgba(255,255,255,${0.25 + Math.random() * 0.45})`; g.lineWidth = 0.8 + Math.random() * 1.6;
+    const x = Math.random() * w, y = Math.random() * h, l = 80 + Math.random() * 220, b = (Math.random() - 0.5) * 30;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + b, y + l / 2, x + b * 0.3, y + l); g.stroke();
+  }
+  g.strokeStyle = 'rgba(60,90,115,0.35)'; g.lineWidth = 1;   // scheurtjes
+  for (let i = 0; i < 9; i++) { let x = Math.random() * w, y = Math.random() * h; g.beginPath(); g.moveTo(x, y);
+    for (let j = 0; j < 6; j++) { x += (Math.random() - 0.5) * 40; y += (Math.random() - 0.3) * 30; g.lineTo(x, y); } g.stroke(); }
+  for (let i = 0; i < 60; i++) {   // luchtbelletjes
+    g.fillStyle = `rgba(255,255,255,${0.35 + Math.random() * 0.4})`; g.beginPath(); g.arc(Math.random() * w, Math.random() * h, 0.8 + Math.random() * 2.2, 0, Math.PI * 2); g.fill();
+  }
 }, true);
-ijsTex.repeat.set(1, BAAN_L / 2);
+ijsTex.repeat.set(1, BAAN_L / 2.5); ijsTex.anisotropy = 4;
 const ijs = new THREE.Mesh(new THREE.PlaneGeometry(2.1, BAAN_L, 1, 60).rotateX(-Math.PI / 2),
-  new THREE.MeshBasicMaterial({ map: ijsTex, alphaMap: vervaag, transparent: true, opacity: 0.92, depthWrite: false }));
+  new THREE.MeshBasicMaterial({ map: ijsTex, alphaMap: vervaag, transparent: true, opacity: 0.9, depthWrite: false }));
 ijs.position.set(0, 0.005, -BAAN_L / 2 + 0.9); wereld.add(ijs);
 // bochten: alles vóór je schuift opzij met bochtX(afstand); bij jou zelf (afstand 0) verandert niets
-let bochtK = 0, bochtD0 = 0, bochtVorig = null;
-function bochtX(afst) { const t = Math.max(0, afst - bochtD0); return bochtK * t * t / 2; }
+// bochtS: na een splitsing schuift de baan na de punt (bochtD0) naar het midden van de gekozen baan
+let bochtK = 0, bochtD0 = 0, bochtS = 0, bochtVorig = null;
+function bochtX(afst) { const t = Math.max(0, afst - bochtD0), r = Math.min(1, t / 2.5); return bochtK * t * t / 2 + bochtS * r * r * (3 - 2 * r); }
 const buigbaar = [ijs];
-for (const kant of [-1, 1]) {   // sneeuwranden
-  const s = new THREE.Mesh(new THREE.PlaneGeometry(0.6, BAAN_L, 1, 60).rotateX(-Math.PI / 2),
-    new THREE.MeshBasicMaterial({ color: 0xffffff, alphaMap: vervaag, transparent: true, opacity: 0.85, depthWrite: false }));
-  s.position.set(kant * 1.35, 0.004, -BAAN_L / 2 + 0.9); wereld.add(s); buigbaar.push(s);
+// sneeuwwallen: lage bulten sneeuw naast het ijs
+const sneeuwMat = new THREE.MeshLambertMaterial({ color: 0xf3f7fc, emissive: 0x9fb4c8, emissiveIntensity: 0.35, alphaMap: vervaag, transparent: true });
+for (const kant of [-1, 1]) {
+  const geo = new THREE.PlaneGeometry(0.9, BAAN_L, 6, 60).rotateX(-Math.PI / 2), pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i), u = (x * kant + 0.45) / 0.9;   // 0 = ijsrand, 1 = buitenkant
+    const bult = Math.sin(Math.PI * Math.min(1, u * 1.15)) * (0.13 + 0.05 * Math.sin(z * 1.7 + kant) + 0.03 * Math.sin(z * 4.3));
+    pos.setY(i, Math.max(0, bult));
+  }
+  geo.computeVertexNormals();
+  const s = new THREE.Mesh(geo, sneeuwMat); s.position.set(kant * 1.5, 0.004, -BAAN_L / 2 + 0.9); wereld.add(s); buigbaar.push(s);
 }
-// paaltjes langs de baan
-const paalGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.5, 8);
-const paalMat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
-const kopMat = new THREE.MeshLambertMaterial({ color: 0xd62828 });
-const palen = [];
+// dennentakken in de sneeuw langs de baan; op elke derde een vlaggetje (Nederland / Friesland)
+const takGeo = bouw([
+  [G.cil6, '#5a3d24', [0, 0.06, 0], [0, 0, 0], [0.018, 0.14, 0.018]],
+  [G.kegel, '#2c5a36', [0, 0.22, 0], [0, 0, 0], [0.14, 0.34, 0.14]],
+  [G.kegel, '#3b7246', [0, 0.36, 0], [0, 0.5, 0], [0.11, 0.28, 0.11]],
+  [G.kegel, '#f4f8fc', [0, 0.47, 0], [0, 0.5, 0], [0.055, 0.1, 0.055]],
+  [G.kegel, '#2c5a36', [0.1, 0.15, 0.03], [0, 0, -0.35], [0.08, 0.22, 0.08]],
+  [G.kegel, '#f4f8fc', [0.13, 0.24, 0.03], [0, 0, -0.35], [0.04, 0.07, 0.04]],
+  [G.kegel, '#3b7246', [-0.09, 0.13, -0.04], [0, 0, 0.3], [0.08, 0.2, 0.08]],
+  [G.bolLaag, '#f4f8fc', [0, 0.02, 0], [0, 0, 0], [0.2, 0.05, 0.16]]
+]);
+const stokGeo = bouw([[G.cil6, '#e8e2d4', [0, 0.6, 0], [0, 0, 0], [0.012, 1.2, 0.012]], [G.bolLaag, '#d9b23a', [0, 1.22, 0], [0, 0, 0], 0.022]]);
+const vlagTex = [
+  canvasTex(96, 64, (c, w, h) => { ['#ae1c28', '#ffffff', '#21468b'].forEach((k, i) => { c.fillStyle = k; c.fillRect(0, i * h / 3, w, h / 3 + 1); }); }),
+  canvasTex(96, 64, (c, w, h) => {   // Friese vlag: blauw-witte banen met rode pompeblêden
+    c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h);
+    c.save(); c.translate(0, h); c.rotate(-Math.atan2(h, w));
+    const L = Math.hypot(w, h), bb = L / 7;
+    for (let i = 0; i < 7; i++) if (i % 2 === 0) { c.fillStyle = '#0060a8'; c.fillRect(-20, -L / 2 + i * bb - 10, L + 40, bb); }
+    c.restore();
+    c.fillStyle = '#d62828';
+    for (const [x, y] of [[16, 46], [40, 30], [64, 14], [28, 58], [76, 40]]) { c.beginPath(); c.moveTo(x, y + 6); c.bezierCurveTo(x - 9, y - 1, x - 3, y - 9, x, y - 3); c.bezierCurveTo(x + 3, y - 9, x + 9, y - 1, x, y + 6); c.fill(); }
+  })
+];
+const vlagGeo = new THREE.PlaneGeometry(0.24, 0.16, 6, 1).translate(0.12, 0, 0);
+const palen = [];   // (heten nog 'palen': ze schuiven mee en buigen mee in de bocht)
 for (let i = 0; i < 10; i++) for (const kant of [-1, 1]) {
   const p = new THREE.Group();
-  const stok = new THREE.Mesh(paalGeo, paalMat); stok.position.y = 0.25;
-  const kop = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.08, 8), kopMat); kop.position.y = 0.52;
-  p.add(stok, kop); p.position.set(kant * 1.2, 0, -i * 3 - 1.5); p.userData.x0 = kant * 1.2; wereld.add(p); palen.push(p);
+  const tak = new THREE.Mesh(takGeo, vcMat); tak.rotation.y = Math.random() * 6; tak.scale.setScalar(0.85 + Math.random() * 0.35); p.add(tak);
+  if ((i + (kant > 0 ? 1 : 0)) % 3 === 0) {
+    const stok = new THREE.Mesh(stokGeo, vcMat); stok.position.x = kant * 0.08; p.add(stok);
+    const vlag = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[(i + kant + 2) % 2], side: THREE.DoubleSide }));
+    vlag.position.set(kant * 0.08, 1.1, 0); p.add(vlag); p.userData.vlag = vlag; p.userData.vlagHoek = kant > 0 ? -0.35 : Math.PI + 0.35;
+  }
+  p.position.set(kant * 1.2, 0, -i * 3 - 1.5); p.userData.x0 = kant * 1.2; wereld.add(p); palen.push(p);
+}
+function wapperVlaggen(t) {
+  for (const p of palen) { const v = p.userData.vlag; if (v) v.rotation.y = p.userData.vlagHoek + 0.3 * Math.sin(t * 3.1 + p.position.z * 0.7); }
+}
+// ---------- Decor langs de baan: publiek, koek-en-zopie, molen, boerderij, knotwilgen ----------
+const JAS = ['#7a2a2a', '#24477f', '#2f5d3a', '#5b2a86', '#8a5a2b', '#c8323c', '#3a6ea5', '#4a4f57'];
+const MUTS = [['#c8323c', '#ffffff'], ['#F6F01D', '#24477f'], ['#43BFFD', '#ffffff'], ['#EB69BB', '#ffffff'], ['#2f5d3a', '#e8b830'], ['#ff8a1e', '#3a2a20']];
+const HUID = ['#f0c8a6', '#e0b08a', '#c68e64', '#8d5a3b', '#f3d2b8'];
+const tsGeo = { jas: new THREE.CylinderGeometry(0.15, 0.21, 0.7, 10), been: new THREE.CapsuleGeometry(0.06, 0.5, 3, 8), arm: new THREE.CapsuleGeometry(0.05, 0.42, 3, 8),
+  sjaal: new THREE.TorusGeometry(0.08, 0.035, 6, 14).rotateX(Math.PI / 2), rand: new THREE.TorusGeometry(0.11, 0.02, 5, 14).rotateX(Math.PI / 2) };
+// eenvoudige toeschouwer: lijf in één stuk, twee losse armen om mee te zwaaien en te juichen
+function maakToeschouwer(i, schaal = 1) {
+  const jas = JAS[i % JAS.length], muts = MUTS[(i * 3 + 1) % MUTS.length], huid = HUID[(i * 7 + 2) % HUID.length], sjaal = MUTS[(i + 2) % MUTS.length][0];
+  const g = new THREE.Group();
+  const lijf = new THREE.Mesh(bouw([
+    [tsGeo.been, '#2d3340', [-0.08, 0.33, 0]], [tsGeo.been, '#2d3340', [0.08, 0.33, 0]],
+    [G.bolLaag, '#2a2018', [-0.08, 0.04, -0.03], [0, 0, 0], [0.06, 0.045, 0.1]], [G.bolLaag, '#2a2018', [0.08, 0.04, -0.03], [0, 0, 0], [0.06, 0.045, 0.1]],
+    [tsGeo.jas, jas, [0, 0.95, 0]], [G.bol, jas, [0, 1.29, 0], [0, 0, 0], [0.17, 0.08, 0.13]], [tsGeo.jas, '#3a3020', [0, 0.72, 0], [0, 0, 0], [1.01, 0.05, 1.01]],
+    [tsGeo.sjaal, sjaal, [0, 1.36, 0]], [G.bol, huid, [0, 1.49, 0], [0, 0, 0], 0.105],
+    [G.bolLaag, '#2a2230', [-0.038, 1.51, -0.094], [0, 0, 0], 0.014], [G.bolLaag, '#2a2230', [0.038, 1.51, -0.094], [0, 0, 0], 0.014],
+    [G.bolLaag, '#e6a283', [0, 1.48, -0.104], [0, 0, 0], [0.018, 0.02, 0.02]], [G.bolLaag, '#f2a0a0', [-0.06, 1.47, -0.085], [0, 0, 0], [0.02, 0.012, 0.008]], [G.bolLaag, '#f2a0a0', [0.06, 1.47, -0.085], [0, 0, 0], [0.02, 0.012, 0.008]],
+    [G.halfBol, muts[0], [0, 1.51, 0], [0, 0, 0], [0.112, 0.13, 0.112]], [tsGeo.rand, muts[1], [0, 1.52, 0]], [G.bolLaag, muts[1], [0, 1.65, 0], [0, 0, 0], 0.04]
+  ]), vcMat);
+  g.add(lijf);
+  const arm = (k) => {
+    const a = new THREE.Mesh(bouw([[tsGeo.arm, jas, [0, -0.24, 0]], [G.bolLaag, '#5a3a26', [0, -0.52, 0], [0, 0, 0], [0.05, 0.06, 0.05]]]), vcMat);
+    a.position.set(k * 0.2, 1.28, 0); g.add(a); return a;
+  };
+  g.userData = { armL: arm(-1), armR: arm(1), fase: i * 1.7, toeschouwer: true };
+  g.scale.setScalar(schaal);
+  return g;
+}
+function zetToeschouwer(f, t, juich) {
+  const u = f.userData, zwaai = Math.sin(t * 0.8 + u.fase) > 0.55;
+  const hop = juich ? Math.max(0, Math.sin(t * 9 + u.fase)) * 0.06 : 0;
+  f.children[0].position.y = hop;
+  u.armL.position.y = u.armR.position.y = 1.28 + hop;
+  u.armL.rotation.set(juich ? 0.2 : 0.1, 0, juich ? -2.6 - 0.2 * Math.sin(t * 9 + u.fase) : -0.12);
+  u.armR.rotation.set(juich ? 0.2 : zwaai ? 0.3 : 0.1, 0, juich ? 2.6 + 0.2 * Math.sin(t * 9 + u.fase) : zwaai ? 2.3 + 0.35 * Math.sin(t * 7) : 0.12);
+}
+function maakPubliek(n, start, kant) {   // een rijtje mensen langs de baan, kant = 1 rechts, -1 links
+  const g = new THREE.Group();
+  for (let i = 0; i < n; i++) {
+    const t = maakToeschouwer(start + i, i === 1 ? 0.72 : 0.95 + 0.05 * ((start + i) % 3));
+    t.position.set(kant * ((i % 2) * 0.3 + Math.sin(i * 2.3) * 0.08), 0, -i * 0.6); t.rotation.y = kant * (Math.PI / 2 + 0.55 + 0.15 * Math.sin(i * 3.1));
+    g.add(t);
+  }
+  g.userData.publiek = g.children.slice();
+  return g;
+}
+// koek-en-zopie: kraampje met dampende ketel
+const stoomTex = canvasTex(64, 64, (c, w, h) => { const gr = c.createRadialGradient(32, 32, 2, 32, 32, 31); gr.addColorStop(0, 'rgba(255,255,255,0.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); });
+function maakKoekEnZopie() {
+  const g = new THREE.Group(), d = [];
+  d.push([G.doos, '#8a5a2b', [0, 0.45, 0], [0, 0, 0], [1.4, 0.9, 0.55]], [G.doos, '#a8743c', [0, 0.92, -0.02], [0, 0, 0], [1.5, 0.05, 0.65]]);
+  for (let i = 0; i < 7; i++) d.push([G.doos, i % 2 ? '#ffffff' : '#c8323c', [-0.6 + i * 0.2, 0.45, -0.28], [0, 0, 0], [0.2, 0.8, 0.02]]);
+  for (const x of [-0.7, 0.7]) for (const z of [-0.3, 0.45]) d.push([G.cil6, '#6b4423', [x, 1.05, z], [0, 0, 0], [0.03, 2.1, 0.03]]);
+  for (let i = 0; i < 8; i++) d.push([G.doos, i % 2 ? '#ffffff' : '#c8323c', [-0.7 + i * 0.2 + 0.1, 2.12, 0.05], [0.35, 0, 0], [0.2, 0.03, 1.2]]);
+  d.push([G.cil, '#b87333', [0.35, 1.08, 0], [0, 0, 0], [0.16, 0.26, 0.16]], [G.bol, '#b87333', [0.35, 1.22, 0], [0, 0, 0], [0.16, 0.06, 0.16]], [G.cil6, '#3a2a20', [0.35, 1.29, 0], [0, 0, 0], [0.02, 0.06, 0.02]]);
+  for (let i = 0; i < 5; i++) d.push([G.cil, ['#ffffff', '#f2e6c8', '#ffffff', '#e8d8b0', '#ffffff'][i], [-0.45 + i * 0.12, 0.99, -0.12], [0, 0, 0], [0.04, 0.09, 0.04]]);
+  d.push([G.doos, '#d9a066', [-0.1, 0.97, 0.05], [0, 0, 0], [0.3, 0.05, 0.18]]);
+  g.add(new THREE.Mesh(bouw(d), vcMat));
+  const bord = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.3), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, map: canvasTex(512, 118, (c, w, h) => {
+    c.fillStyle = '#21468b'; c.beginPath(); c.roundRect(3, 3, w - 6, h - 6, 16); c.fill(); c.strokeStyle = '#ffffff'; c.lineWidth = 6; c.stroke();
+    c.fillStyle = '#ffffff'; c.font = 'bold 66px Georgia, serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Koek & Zopie', w / 2, h / 2 + 4); }) }));
+  bord.position.set(0, 1.85, -0.36); bord.rotation.y = Math.PI; g.add(bord);
+  const verkoper = maakToeschouwer(5); verkoper.position.set(-0.25, 0, 0.45); g.add(verkoper);
+  g.userData.publiek = [verkoper];
+  g.userData.stoom = [0, 1, 2].map(i => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: stoomTex, transparent: true, depthWrite: false })); sp.userData.f = i / 3; g.add(sp); return sp; });
+  return g;
+}
+function maakMolen() {
+  const g = new THREE.Group(), d = [];
+  d.push([new THREE.CylinderGeometry(1.0, 1.7, 6.5, 8), '#3d4a45', [0, 3.25, 0]], [new THREE.CylinderGeometry(1.75, 1.75, 0.6, 8), '#8a3b2a', [0, 0.3, 0]],
+    [G.kegel, '#2a302e', [0, 6.95, 0], [0, 0, 0], [1.15, 1.0, 1.15]], [G.doos, '#ffffff', [0, 0.65, -1.62], [0.2, 0, 0], [0.55, 0.9, 0.06]],
+    [G.doos, '#e8e2d4', [0, 3.6, -1.32], [0.1, 0, 0], [0.3, 0.4, 0.05]], [new THREE.TorusGeometry(1.45, 0.06, 4, 16).rotateX(Math.PI / 2), '#6b4423', [0, 2.6, 0]],
+    [G.cil6, '#6b4423', [0, 6.45, -1.1], [Math.PI / 2, 0, 0], [0.12, 0.6, 0.12]]);
+  g.add(new THREE.Mesh(bouw(d), vcMat));
+  const w = [];
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2, c = Math.cos(a), s2 = Math.sin(a);
+    w.push([G.doos, '#5a3a1e', [-s2 * 2.3, c * 2.3, 0], [0, 0, a], [0.14, 4.6, 0.1]]);
+    w.push([G.doos, '#f4efe2', [-s2 * 2.6 + c * 0.4, c * 2.6 + s2 * 0.4, 0.02], [0, 0, a], [0.62, 3.4, 0.04]]);
+    for (let j = 0; j < 6; j++) w.push([G.doos, '#7a5230', [-s2 * (1.0 + j * 0.6) + c * 0.4, c * (1.0 + j * 0.6) + s2 * 0.4, 0.05], [0, 0, a], [0.66, 0.05, 0.05]]);
+  }
+  const wieken = new THREE.Mesh(bouw(w), vcMat); wieken.position.set(0, 6.45, -1.45); g.add(wieken);
+  g.userData.wieken = wieken;
+  return g;
+}
+function maakBoerderij() {
+  const d = [], prisma = new THREE.CylinderGeometry(1, 1, 1, 3).rotateX(-Math.PI / 2);   // dak: punt omhoog, nok in de lengte
+  d.push([G.doos, '#9a3b2a', [0, 1.2, 0], [0, 0, 0], [3.2, 2.4, 3.2]], [prisma, '#e3eaf0', [0, 3.2, 0], [0, 0, 0], [1.95, 1.6, 3.4]]);
+  d.push([G.doos, '#7a2e22', [0, 2.2, 6.0], [0, 0, 0], [5.0, 4.4, 8.5]], [prisma, '#dbe3ea', [0, 5.7, 6.0], [0, 0, 0], [3.0, 2.6, 8.7]]);
+  for (const x of [-0.8, 0.8]) d.push([G.doos, '#ffffff', [x, 1.4, -1.62], [0, 0, 0], [0.6, 0.8, 0.05]], [G.doos, '#2f5d3a', [x, 1.4, -1.65], [0, 0, 0], [0.5, 0.7, 0.03]]);
+  d.push([G.doos, '#2f5d3a', [1.2, 1.8, 1.75], [0, 0, 0], [1.4, 2.6, 0.05]], [G.doos, '#f4f8fc', [0, 4.6, -0.6], [0, 0, 0], [0.4, 0.8, 0.4]]);
+  const g = new THREE.Group(); g.add(new THREE.Mesh(bouw(d), vcMat)); return g;
+}
+const wilgGeo = (() => {
+  const d = [[G.cil, '#5e554a', [0, 0.8, 0], [0, 0, 0], [0.2, 1.6, 0.2]], [G.bolLaag, '#4e463c', [0, 1.62, 0], [0, 0, 0], [0.28, 0.2, 0.28]], [G.bolLaag, '#f4f8fc', [0, 0.04, 0], [0, 0, 0], [0.5, 0.08, 0.5]]];
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2, h = 0.9 + (i % 3) * 0.3; d.push([G.cil6, '#6a5a3a', [Math.cos(a) * 0.18, 1.65 + h / 2, Math.sin(a) * 0.18], [Math.sin(a) * 0.3, 0, -Math.cos(a) * 0.3], [0.018, h, 0.018]]); }
+  return bouw(d);
+})();
+const popGeo = bouw([[G.bol, '#f4f8fc', [0, 0.28, 0], [0, 0, 0], 0.3], [G.bol, '#f4f8fc', [0, 0.7, 0], [0, 0, 0], 0.22], [G.bol, '#f4f8fc', [0, 1.02, 0], [0, 0, 0], 0.15],
+  [G.kegel, '#ff8a1e', [0, 1.02, -0.2], [-Math.PI / 2, 0, 0], [0.03, 0.14, 0.03]], [G.bolLaag, '#1b1b1b', [-0.05, 1.07, -0.13], [0, 0, 0], 0.018], [G.bolLaag, '#1b1b1b', [0.05, 1.07, -0.13], [0, 0, 0], 0.018],
+  [G.cil, '#1b1b1b', [0, 1.2, 0], [0, 0, 0], [0.11, 0.18, 0.11]], [G.cil, '#1b1b1b', [0, 1.12, 0], [0, 0, 0], [0.17, 0.02, 0.17]], [new THREE.TorusGeometry(0.15, 0.04, 6, 14).rotateX(Math.PI / 2), '#c8323c', [0, 0.88, 0]],
+  [G.cil6, '#5a3a1e', [0.3, 0.75, 0], [0, 0, 1.1], [0.015, 0.4, 0.015]], [G.cil6, '#5a3a1e', [-0.3, 0.75, 0], [0, 0, -1.1], [0.015, 0.4, 0.015]]]);
+// x: afstand opzij, z: begin, per: na zoveel meter komt hij terug, ry: draaiing (0 = kijkt vooruit)
+const decor = [];
+function zetDecor(obj, x, z, per, ry = 0) { obj.userData.d = { x, z, per, ry }; obj.position.set(x, 0, z); obj.rotation.y = ry; wereld.add(obj); decor.push(obj); return obj; }
+zetDecor(maakPubliek(3, 0, 1), 2.15, -9, 55);
+zetDecor(maakPubliek(4, 4, -1), -2.15, -30, 55);
+zetDecor(maakKoekEnZopie(), -2.9, -48, 85, -Math.PI / 2 - 0.3);
+zetDecor(maakMolen(), 9, -34, 110, Math.PI / 2 + 0.5);
+zetDecor(maakBoerderij(), -13, -80, 120, -Math.PI / 2 - 0.4);
+zetDecor(new THREE.Mesh(popGeo, vcMat), 2.4, -70, 95, Math.PI / 2 + 0.4);
+for (let i = 0; i < 6; i++) { const w = new THREE.Mesh(wilgGeo, vcMat); w.userData.schaal = 0.9 + (i % 3) * 0.12; zetDecor(w, (i % 2 ? 1 : -1) * (4.2 + (i % 3) * 0.8), -12 - i * 11, 66, i); }
+let juichT = -9;   // publiek juicht even na een gelukte opdracht
+function updateDecor(dt, snelheid, t) {
+  const juich = t - juichT < 2.5;
+  for (const o of decor) {
+    const d = o.userData.d;
+    d.z += snelheid * dt; if (d.z > 6) d.z -= d.per;
+    const ver = -d.z;
+    o.visible = ver < 34;
+    if (!o.visible) continue;
+    o.scale.setScalar(Math.min(1, (34 - ver) / 4) * (o.userData.schaal || 1));
+    const tt = Math.max(0, ver - bochtD0);
+    o.position.set(d.x + bochtX(ver), 0, d.z); o.rotation.y = d.ry - Math.atan(bochtK * tt);
+    if (o.userData.publiek) for (const p of o.userData.publiek) zetToeschouwer(p, t, juich);
+    if (o.userData.wieken) o.userData.wieken.rotation.z -= dt * 0.9;
+    if (o.userData.stoom) for (const sp of o.userData.stoom) { const f = (t * 0.35 + sp.userData.f) % 1; sp.position.set(0.35 + Math.sin(t + f * 6) * 0.06, 1.35 + f * 0.8, 0); sp.scale.setScalar(0.12 + f * 0.35); sp.material.opacity = 0.7 * (1 - f); }
+  }
+}
+// lichte sneeuwval rond de baan
+const SNEEUW_N = 450;
+const sneeuw = (() => {
+  const pos = new Float32Array(SNEEUW_N * 3);
+  for (let i = 0; i < SNEEUW_N; i++) pos.set([(Math.random() - 0.5) * 9, Math.random() * 3.6, -Math.random() * 24 + 3], i * 3);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const p = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.028, map: stoomTex, transparent: true, depthWrite: false, color: 0xffffff }));
+  p.frustumCulled = false; wereld.add(p); return p;
+})();
+function updateSneeuw(dt, snelheid, t) {
+  if (!sneeuw.visible) return;
+  const a = sneeuw.geometry.attributes.position.array;
+  for (let i = 0; i < SNEEUW_N; i++) {
+    const j = i * 3;
+    a[j + 1] -= (0.35 + (i % 7) * 0.05) * dt; a[j] += Math.sin(t * 0.8 + i) * 0.12 * dt; a[j + 2] += snelheid * dt;
+    if (a[j + 1] < 0) { a[j + 1] += 3.6; a[j] = (Math.random() - 0.5) * 9; }
+    if (a[j + 2] > 3) a[j + 2] -= 24;
+  }
+  sneeuw.geometry.attributes.position.needsUpdate = true;
+}
+
+// ---------- Figuren: klassieke Elfstedenschaatser (maatje, stempelaar, eigen lijf) ----------
+const texCache = {};
+const cTex = (sleutel, maak) => texCache[sleutel] || (texCache[sleutel] = maak());
+function streepTex(kleuren, n = 8) {
+  return cTex('streep' + kleuren + n, () => canvasTex(64, 64, (c, w, h) => { for (let i = 0; i < n; i++) { c.fillStyle = kleuren[i % kleuren.length]; c.fillRect(0, i * h / n, w, h / n + 1); } }));
+}
+function truiTex(basis, band, accent) {   // trui met Noors patroon-band
+  return cTex('trui' + basis + band + accent, () => canvasTex(128, 128, (c, w, h) => {
+    c.fillStyle = basis; c.fillRect(0, 0, w, h);
+    c.fillStyle = band; c.fillRect(0, 34, w, 30);
+    c.fillStyle = accent; for (let x = 0; x < w; x += 16) { c.beginPath(); c.moveTo(x, 49); c.lineTo(x + 8, 38); c.lineTo(x + 16, 49); c.lineTo(x + 8, 60); c.fill(); }
+    c.fillStyle = band; c.fillRect(0, 70, w, 5); c.fillRect(0, 26, w, 5);
+  }));
+}
+const MAAT = { U: 0.42, L: 0.42, enkel: 0.1 }, ARM_A = 0.27, ARM_B = 0.25;   // bovenbeen, onderbeen, enkel tot ijs; boven- en onderarm
+// opties: trui, band, accent, broek, kousen [2], muts [2], sjaal (null = geen), want, huid, hoofd (false = geen hoofd), schaatsen
+function maakFiguur(o = {}) {
+  o = { trui: '#24477f', band: '#f2efe6', accent: '#c8323c', broek: '#3b3f4a', kousen: ['#c8323c', '#f2efe6'], muts: ['#c8323c', '#f2efe6'], sjaal: '#e8b830',
+        want: '#5a3a26', huid: '#f0c8a6', hoofd: true, schaatsen: true, ...o };
+  const huid = tm(o.huid), g = new THREE.Group();
+  const heup = new THREE.Group(); g.add(heup);
+  const bekken = new THREE.Mesh(G.bol, tm(o.broek)); bekken.scale.set(0.16, 0.11, 0.12); heup.add(bekken);
+  const romp = new THREE.Group(); heup.add(romp);
+  const truiMat = cTex('truiMat' + o.trui + o.band + o.accent, () => new THREE.MeshToonMaterial({ map: truiTex(o.trui, o.band, o.accent), gradientMap: toonGrad }));
+  const lijf = new THREE.Mesh(G.caps(0.15, 0.24), truiMat); lijf.scale.set(1, 1, 0.82); lijf.position.y = 0.25; romp.add(lijf);
+  const nek = new THREE.Group(); nek.position.y = 0.48; romp.add(nek);
+  let slip = null, kop = null;
+  if (o.sjaal) {
+    const sjaal = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.035, 8, 16).rotateX(Math.PI / 2), tm(o.sjaal)); sjaal.position.y = -0.01; nek.add(sjaal);
+    slip = new THREE.Group(); slip.position.set(0.05, -0.01, 0.07); nek.add(slip);
+    slip.add(new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.26, 0.02).translate(0, -0.13, 0), tm(o.sjaal)));
+  }
+  if (o.hoofd) {
+    kop = new THREE.Group(); kop.position.y = 0.11; nek.add(kop);
+    const h = new THREE.Mesh(G.bol, huid); h.scale.setScalar(0.115); kop.add(h);
+    const neus = new THREE.Mesh(G.bolLaag, tm('#e6a283')); neus.scale.set(0.022, 0.024, 0.026); neus.position.set(0, -0.01, -0.112); kop.add(neus);
+    for (const k of [-1, 1]) {
+      const oog = new THREE.Mesh(G.bolLaag, tm('#ffffff')); oog.scale.setScalar(0.021); oog.position.set(k * 0.042, 0.024, -0.099); kop.add(oog);
+      const pup = new THREE.Mesh(G.bolLaag, tm('#2a2230')); pup.scale.setScalar(0.012); pup.position.set(k * 0.042, 0.024, -0.117); kop.add(pup);
+      const wang = new THREE.Mesh(G.bolLaag, tm('#f2a0a0')); wang.scale.set(0.022, 0.014, 0.008); wang.position.set(k * 0.066, -0.02, -0.092); kop.add(wang);
+      const oor = new THREE.Mesh(G.bolLaag, huid); oor.scale.set(0.018, 0.03, 0.02); oor.position.set(k * 0.113, 0, 0); kop.add(oor);
+    }
+    const mond = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.006, 6, 12, Math.PI), tm('#8a3a3a')); mond.rotation.z = Math.PI; mond.position.set(0, -0.042, -0.104); kop.add(mond);
+    const muts = new THREE.Mesh(G.halfBol, cTex('mutsMat' + o.muts, () => new THREE.MeshToonMaterial({ map: streepTex(o.muts, 6), gradientMap: toonGrad })));
+    muts.scale.set(0.124, 0.15, 0.124); muts.position.y = 0.025; kop.add(muts);
+    const rand = new THREE.Mesh(new THREE.TorusGeometry(0.118, 0.022, 6, 18).rotateX(Math.PI / 2), tm(o.muts[1])); rand.position.y = 0.03; kop.add(rand);
+    const pompon = new THREE.Mesh(G.bol, tm(o.muts[0])); pompon.scale.setScalar(0.045); pompon.position.y = 0.18; kop.add(pompon);
+  }
+  const arm = (k) => {
+    const schouder = new THREE.Group(); schouder.position.set(k * 0.185, 0.4, 0); romp.add(schouder);
+    const bo = new THREE.Mesh(G.caps(0.052, 0.2), truiMat); bo.position.y = -0.13; schouder.add(bo);
+    const elleboog = new THREE.Group(); elleboog.position.y = -ARM_A; schouder.add(elleboog);
+    const on = new THREE.Mesh(G.caps(0.046, 0.18), truiMat); on.position.y = -0.11; elleboog.add(on);
+    const hand = new THREE.Mesh(G.bol, tm(o.want)); hand.scale.set(0.05, 0.062, 0.05); hand.position.y = -ARM_B; elleboog.add(hand);
+    return { schouder, elleboog, hand };
+  };
+  const kousMat = cTex('kousMat' + o.kousen, () => new THREE.MeshToonMaterial({ map: streepTex(o.kousen, 10), gradientMap: toonGrad }));
+  const been = (k) => {
+    const heupG = new THREE.Group(); heupG.position.set(k * 0.09, 0, 0); heup.add(heupG);
+    const dij = new THREE.Mesh(G.caps(0.078, MAAT.U - 0.12), tm(o.broek)); dij.position.y = -MAAT.U / 2; heupG.add(dij);
+    const knie = new THREE.Group(); knie.position.y = -MAAT.U; heupG.add(knie);
+    const kuit = new THREE.Mesh(G.caps(0.058, MAAT.L - 0.1), kousMat); kuit.position.y = -MAAT.L / 2; knie.add(kuit);
+    const enkel = new THREE.Group(); enkel.position.y = -MAAT.L; knie.add(enkel);
+    const schoen = new THREE.Mesh(G.caps(0.05, 0.14).rotateX(Math.PI / 2), tm('#3a2a20')); schoen.position.set(0, -0.025, -0.04); enkel.add(schoen);
+    if (o.schaatsen) {
+      const ijzer = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.03, 0.46), tm('#d8dde4')); ijzer.position.set(0, -0.085, -0.05); enkel.add(ijzer);
+      const punt = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.005, 4, 8, Math.PI / 2), tm('#d8dde4')); punt.rotation.set(0, Math.PI / 2, 0); punt.position.set(0, -0.07, -0.28); enkel.add(punt);
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.02, 0.3), tm('#9a6a3a')); plank.position.set(0, -0.06, -0.04); enkel.add(plank);
+    }
+    return { heupG, knie, enkel };
+  };
+  g.userData = { heup, romp, nek, kop, slip, armL: arm(-1), armR: arm(1), beenL: been(-1), beenR: been(1) };
+  return g;
+}
+// zachte schaduwvlek op het ijs
+const schaduwTex = canvasTex(64, 64, (c, w, h) => { const gr = c.createRadialGradient(32, 32, 2, 32, 32, 31); gr.addColorStop(0, 'rgba(20,30,50,0.45)'); gr.addColorStop(1, 'rgba(20,30,50,0)'); c.fillStyle = gr; c.fillRect(0, 0, w, h); });
+const schaduwMat = new THREE.MeshBasicMaterial({ map: schaduwTex, transparent: true, depthWrite: false });
+function maakSchaduw(r = 0.4) { const m = new THREE.Mesh(new THREE.PlaneGeometry(2 * r, 2 * r).rotateX(-Math.PI / 2), schaduwMat); m.position.y = 0.012; m.renderOrder = 3; return m; }
+// houding. s: gewicht (-1 links … 1 rechts), hurk: door de knieën (0..1), buk: extra diep, rug: armen op de rug,
+// juich: armen omhoog, reik: arm opzij (-1/1), kijk: hoofd draaien
+function poseerFiguur(f, p, t = 0) {
+  const u = f.userData, U = MAAT.U, L = MAAT.L;
+  const hurk = Math.min(1, p.hurk + (p.buk || 0) * 0.6);
+  let steunY = 0;
+  for (const [k, b] of [[-1, u.beenL], [1, u.beenR]]) {
+    const duw = Math.max(0, -p.s * k);   // dit been zet af (opzij gestrekt)
+    const fh = hurk * 1.05 * (1 - 0.55 * duw), fk = -hurk * 1.9 * (1 - 0.65 * duw);
+    b.heupG.rotation.set(fh, 0, k * (0.04 + 0.5 * duw)); b.knie.rotation.set(fk, 0, 0); b.enkel.rotation.set(-(fh + fk), 0, -k * (0.04 + 0.5 * duw));
+    if (duw === 0) steunY = Math.max(steunY, U * Math.cos(fh) + L * Math.cos(fh + fk));
+  }
+  u.heup.position.set(p.s * 0.1, steunY + MAAT.enkel, 0);
+  const juich = p.juich || 0, tilt = (0.25 + 0.75 * hurk) + (p.buk || 0) * 0.25 - 0.5 * juich * (1 - hurk);
+  u.tilt = tilt;
+  u.romp.rotation.set(-tilt, 0, -p.s * 0.12);
+  if (u.kop) u.kop.rotation.set(tilt * 0.85, p.kijk || 0, 0);
+  if (u.slip) u.slip.rotation.x = 0.6 + 0.25 * Math.sin(t * 7) + 0.4 * hurk;
+  const arm = (a, k, opRug, zwaai) => {
+    let sx, sz, ex, ez = 0;
+    if (opRug) { sx = -0.15; sz = k * 0.35; ex = 0.2; ez = -k * 1.9; }
+    else { sx = tilt + 0.8 * zwaai; sz = k * (0.12 + 0.2 * Math.abs(zwaai)); ex = 0.45; }
+    const j = juich; sx = sx * (1 - j) + (tilt * 0.3) * j; sz = sz * (1 - j) + k * 2.7 * j; ex = ex * (1 - j) + 0.15 * j; ez *= (1 - j);
+    const r = Math.max(0, (p.reik || 0) * k); sx = sx * (1 - r) + tilt * r; sz = sz * (1 - r) + k * 1.45 * r; ex = ex * (1 - r) + 0.1 * r; ez *= (1 - r);
+    a.schouder.rotation.set(sx, 0, sz); a.elleboog.rotation.set(ex, 0, ez);
+  };
+  arm(u.armL, -1, juich < 0.5 && (p.reik || 0) > -0.3, 0);
+  arm(u.armR, 1, (p.rug || 0) > 0.5 && juich < 0.5, -p.s);
+}
+// arm naar een doel (in romp-coördinaten) laten reiken: twee botten, elleboog naar buiten en beneden
+const _as = new THREE.Vector3(), _e = new THREE.Vector3(), _pl = new THREE.Vector3(), _qq = new THREE.Quaternion();
+function armNaar(a, k, doel) {
+  const d = doel.clone().sub(a.schouder.position);
+  const len = Math.min(ARM_A + ARM_B - 0.005, Math.max(0.08, d.length()));
+  const cosE = (ARM_A * ARM_A + ARM_B * ARM_B - len * len) / (2 * ARM_A * ARM_B);
+  const beta = Math.PI - Math.acos(Math.max(-1, Math.min(1, cosE)));
+  a.elleboog.rotation.set(beta, 0, 0);
+  const hand = new THREE.Vector3(0, -ARM_A - ARM_B * Math.cos(beta), -ARM_B * Math.sin(beta)).normalize();
+  _as.copy(d).normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(hand, _as);
+  _e.set(0, -1, 0).applyQuaternion(q); _e.addScaledVector(_as, -_e.dot(_as));
+  _pl.set(k * 0.6, -1, 0.35); _pl.addScaledVector(_as, -_pl.dot(_as));
+  if (_e.lengthSq() > 1e-6 && _pl.lengthSq() > 1e-6) {
+    _e.normalize(); _pl.normalize();
+    let hoek = Math.acos(Math.max(-1, Math.min(1, _e.dot(_pl))));
+    if (new THREE.Vector3().crossVectors(_e, _pl).dot(_as) < 0) hoek = -hoek;
+    q.premultiply(_qq.setFromAxisAngle(_as, hoek));
+  }
+  a.schouder.quaternion.copy(q);
 }
 
 // ---------- Maatje ----------
-function maakMaatje(jas = K.paars, mutsKleur = K.geel, sjaalKleur = K.roze) {
-  const m = (c) => new THREE.MeshLambertMaterial({ color: c });
-  const g = new THREE.Group();
-  const heup = new THREE.Group(); heup.position.y = 0.95; g.add(heup);
-  const romp = new THREE.Group(); heup.add(romp);
-  const lijf = new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.38, 6, 12), m(jas)); lijf.position.y = 0.3; romp.add(lijf);
-  const sjaal = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.035, 8, 16).rotateX(Math.PI / 2), m(sjaalKleur)); sjaal.position.y = 0.58; romp.add(sjaal);
-  const hoofd = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 12), m(0xc98d6a)); hoofd.position.y = 0.7; romp.add(hoofd);
-  const muts = new THREE.Mesh(new THREE.SphereGeometry(0.118, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), m(mutsKleur)); muts.position.y = 0.72; romp.add(muts);
-  const pompon = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), m(0xffffff)); pompon.position.y = 0.85; romp.add(pompon);
-  const arm = (kant) => { const a = new THREE.Group(); a.position.set(kant * 0.21, 0.5, 0);
-    const s = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.4, 4, 8), m(jas)); s.position.y = -0.24; a.add(s);
-    const h = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), m(0x3b2a1e)); h.position.y = -0.5; a.add(h); romp.add(a); return a; };
-  const been = (kant) => { const b = new THREE.Group(); b.position.set(kant * 0.1, 0, 0);
-    const s = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.72, 4, 8), m(0x1f2a44)); s.position.y = -0.45; b.add(s);
-    const ijzer = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.42), m(0xdddddd)); ijzer.position.set(0, -0.93, -0.06); b.add(ijzer);
-    heup.add(b); return b; };
-  g.userData = { heup, romp, armL: arm(-1), armR: arm(1), beenL: been(-1), beenR: been(1), pose: { lean: 0, buk: 0, rug: 0, juich: 0, zij: 0, reik: 0 } };
-  return g;
-}
-const maatje = maakMaatje(); maatje.position.set(-0.45, 0, -2.6); wereld.add(maatje);
+const maatje = maakFiguur({ trui: '#5b2a86', band: '#F6F01D', accent: '#EB69BB', muts: ['#662A88', '#F6F01D'], sjaal: '#EB69BB', kousen: ['#662A88', '#f2efe6'] });
+maatje.position.set(-0.45, 0, -2.6); wereld.add(maatje);
+const maatjeSchaduw = maakSchaduw(0.38); maatjeSchaduw.position.z = -2.6; wereld.add(maatjeSchaduw);
 const MAATJE_X = -0.45;
+const mPose = { lean: 0, buk: 0, rug: 0, juich: 0, zij: 0, reik: 0, draai: 0, kijk: 0 };
+let kijkT = -9;   // moment van een nieuw tekstwolkje: dan kijkt het maatje even over zijn schouder
 function poseerMaatje(t, doel, dt) {
-  const u = maatje.userData, p = u.pose, k = Math.min(1, dt * 6);
-  for (const key in doel) p[key] += (doel[key] - p[key]) * k;
-  maatje.position.x = MAATJE_X + p.lean * 0.1 + p.zij;
-  maatje.position.y = p.juich * Math.max(0, Math.sin(t * 9)) * 0.06;
-  maatje.rotation.z = -p.lean * 0.12;
-  u.heup.position.y = 0.95 - 0.28 * p.buk;
-  u.beenL.scale.y = u.beenR.scale.y = 1 - 0.28 * p.buk;
-  u.romp.rotation.x = -0.35 - 0.45 * p.buk;
-  u.beenL.rotation.z = -Math.max(0, p.lean) * 0.35;   // afzetten opzij
-  u.beenR.rotation.z = Math.max(0, -p.lean) * 0.35;
-  const rR = Math.max(0, p.reik || 0), rL = Math.max(0, -(p.reik || 0));
-  u.armL.rotation.set(-1.0 * p.rug + 0.25 * p.lean * (1 - rL), 0, -0.15 - 2.5 * p.juich + 0.4 * p.rug - 1.25 * rL);
-  u.armR.rotation.set(-1.0 * p.rug - 0.25 * p.lean * (1 - rR), 0, 0.15 + 2.5 * p.juich - 0.4 * p.rug + 1.25 * rR);
+  const p = mPose, k = Math.min(1, dt * 6);
+  for (const key in p) p[key] += ((doel[key] || 0) - p[key]) * (key === 'draai' ? k * 0.5 : k);
+  const kijk = performance.now() / 1000 - kijkT < 1.4 && p.draai < 0.2 ? 0.9 : 0;
+  p.kijk += (kijk - p.kijk) * k;
+  maatje.position.x = MAATJE_X + p.lean * 0.08 + p.zij;
+  maatje.position.y = p.juich * Math.max(0, Math.sin(t * 9)) * 0.07;
+  maatje.rotation.y = p.draai * Math.PI;
+  poseerFiguur(maatje, { s: p.lean * 0.85, hurk: 0.55 * (1 - 0.7 * p.juich) * (1 - 0.6 * p.draai), buk: p.buk, rug: p.rug, juich: p.juich, reik: p.reik, kijk: p.kijk }, t);
+}
+
+// ---------- Je eigen lijf (half doorzichtig, zonder hoofd) ----------
+let lijfAan = true;
+const lijf = maakFiguur({ trui: '#3a6ea5', band: '#e8eef5', accent: '#43BFFD', broek: '#2d3340', kousen: ['#43BFFD', '#e8eef5'], want: '#e8eef5', hoofd: false, sjaal: null });
+lijf.traverse(m => { if (m.isMesh) { m.material = m.material.clone(); m.material.transparent = true; m.material.opacity = 0.5; m.renderOrder = 4; } });
+lijf.visible = false; scene.add(lijf);
+const lijfSchaduw = maakSchaduw(0.3); lijfSchaduw.visible = false; scene.add(lijfSchaduw);
+const NEK_OOG = 0.134;   // ogen zitten zo veel boven de nek (figuurmaat)
+const nekTabel = [];      // nekhoogte bij hurk 0 … 1
+for (let i = 0; i <= 20; i++) {
+  poseerFiguur(lijf, { s: 0, hurk: i / 20 }); lijf.updateMatrixWorld(true);
+  nekTabel.push(lijf.userData.nek.getWorldPosition(new THREE.Vector3()).y);
+}
+const lijfStand = { hurk: 0, s: 0, midden: 0 };
+function updateLijf(p, q, polsen, lat, dt) {
+  if (!lijfAan || !base) { lijf.visible = lijfSchaduw.visible = false; return; }
+  lijf.visible = lijfSchaduw.visible = true;
+  const sc = Math.max(0.8, Math.min(1.3, base.y / (nekTabel[0] + NEK_OOG)));
+  lijf.scale.setScalar(sc);
+  // hurk zo kiezen dat de nek onder je ogen uitkomt
+  const nekDoel = (p.y - NEK_OOG * sc) / sc;
+  let h = 1;
+  for (let i = 0; i < 20; i++) if (nekTabel[i + 1] < nekDoel) { h = (i + (nekTabel[i] - nekDoel) / (nekTabel[i] - nekTabel[i + 1])) / 20; break; }
+  const k = Math.min(1, dt * 10);
+  lijfStand.hurk += (Math.max(0, Math.min(1, h)) - lijfStand.hurk) * k;
+  lijfStand.midden += (lat - lijfStand.midden) * Math.min(1, dt / 2);
+  lijfStand.s += (Math.max(-1, Math.min(1, (lat - lijfStand.midden) / 0.1)) - lijfStand.s) * k;
+  // draaiing: vooral met de baan mee, een beetje met je hoofd mee
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q), hoofdYaw = Math.atan2(-f.x, -f.z), baanYaw = wereld.rotation.y;
+  let dYaw = hoofdYaw - baanYaw; dYaw = Math.atan2(Math.sin(dYaw), Math.cos(dYaw));
+  const yaw = baanYaw + 0.3 * dYaw;
+  lijf.rotation.set(0, yaw, 0);
+  const u = lijf.userData;
+  poseerFiguur(lijf, { s: lijfStand.s, hurk: lijfStand.hurk });
+  // nek precies onder je hoofd (iets achter je ogen)
+  lijf.position.set(0, 0, 0); lijf.updateMatrixWorld(true);
+  const nek = u.nek.getWorldPosition(new THREE.Vector3());
+  const voor = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  lijf.position.set(p.x - voor.x * 0.09 * sc - nek.x, 0, p.z - voor.z * 0.09 * sc - nek.z);
+  lijf.updateMatrixWorld(true);
+  // armen naar je echte polsen; zie ik je hand niet, dan hangt de arm rustig
+  for (const [a, kk, naam] of [[u.armL, -1, 'left'], [u.armR, 1, 'right']]) {
+    const pols = polsen[naam];
+    if (pols) { armNaar(a, kk, u.romp.worldToLocal(pols.clone())); a.hand.visible = false; }
+    else { a.schouder.rotation.set(u.tilt * 0.9, 0, kk * 0.14); a.elleboog.rotation.set(0.35, 0, 0); a.hand.visible = true; }
+  }
+  lijfSchaduw.position.set(lijf.position.x, 0.012, lijf.position.z);
 }
 
 // ---------- Tekstwolkje boven het maatje ----------
@@ -208,7 +605,9 @@ const wolk = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.41), new THREE.MeshBa
 wolk.renderOrder = 10; scene.add(wolk);
 let wolkTekst = null;
 function zetWolk(tekst, accent = '#662A88') {
-  if (tekst === wolkTekst) return; wolkTekst = tekst;
+  if (tekst === wolkTekst) return;
+  if (tekst && (!wolkTekst || wolkTekst.split(' ')[0] !== tekst.split(' ')[0])) kijkT = performance.now() / 1000;
+  wolkTekst = tekst;
   const g = wc; g.clearRect(0, 0, 1024, 420);
   if (!tekst) { wolk.visible = false; wolkTex.needsUpdate = true; return; }
   wolk.visible = true;
@@ -238,25 +637,43 @@ const bord = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.164), new THREE.Mesh
 wereld.add(bord);
 function tekenBord(r1, r2) {
   const g = bc; g.clearRect(0, 0, 512, 200);
-  g.fillStyle = '#215C9A'; g.beginPath(); g.roundRect(6, 6, 500, 188, 24); g.fill();
-  g.strokeStyle = '#ffffff'; g.lineWidth = 6; g.stroke();
-  g.fillStyle = '#fff'; g.textAlign = 'center'; g.font = 'bold 58px system-ui, sans-serif'; g.fillText(r1, 256, 88);
-  g.font = '40px system-ui, sans-serif'; g.fillText(r2, 256, 156);
+  g.fillStyle = '#7a5230'; g.beginPath(); g.roundRect(6, 6, 500, 188, 18); g.fill();
+  g.strokeStyle = 'rgba(60,35,15,0.35)'; g.lineWidth = 2;
+  for (let i = 0; i < 9; i++) { g.beginPath(); g.moveTo(14, 24 + i * 19); g.bezierCurveTo(170, 18 + i * 19 + (i % 3) * 4, 340, 30 + i * 19, 498, 22 + i * 19); g.stroke(); }
+  g.strokeStyle = '#4a2f18'; g.lineWidth = 8; g.beginPath(); g.roundRect(6, 6, 500, 188, 18); g.stroke();
+  g.fillStyle = '#5a3a1e'; for (const [x, y] of [[26, 26], [486, 26], [26, 174], [486, 174]]) { g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = '#fff6dc'; g.textAlign = 'center'; g.font = 'bold 60px Georgia, serif'; g.fillText(r1, 256, 88);
+  g.font = '38px Georgia, serif'; g.fillText(r2, 256, 152);
   bordTex.needsUpdate = true;
 }
 
 // ---------- Objecten voor de opdrachten ----------
 function maakWak() {
   const g = new THREE.Group();
-  const water = new THREE.Mesh(new THREE.CircleGeometry(1, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x0b2c4a, transparent: true, opacity: 0.95, depthWrite: false }));
-  water.scale.set(0.42, 1, 0.6); water.position.y = 0.008;
-  const rand = new THREE.Mesh(new THREE.RingGeometry(0.95, 1.08, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }));
-  rand.scale.set(0.42, 1, 0.6); rand.position.y = 0.009;
-  const vlag = new THREE.Group();
-  const stok = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.9, 6), new THREE.MeshLambertMaterial({ color: 0x8a5a2b })); stok.position.y = 0.45;
-  const doek = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 0.16), new THREE.MeshBasicMaterial({ color: 0xd62828, side: THREE.DoubleSide })); doek.position.set(0.13, 0.8, 0);
-  vlag.add(stok, doek); vlag.position.set(0.45, 0, 0);
-  g.add(water, rand, vlag); g.position.x = 0.15; return g;
+  // open water met een rafelige, opgestuwde ijsrand en losse schotsjes
+  const vorm = new THREE.Shape(), n = 28, rx = 0.42, rz = 0.6;
+  for (let i = 0; i <= n; i++) { const a = i / n * Math.PI * 2, r = 0.88 + 0.12 * Math.sin(a * 5 + 1) + 0.06 * Math.sin(a * 11); const x = Math.cos(a) * r * rx, z = Math.sin(a) * r * rz; i ? vorm.lineTo(x, z) : vorm.moveTo(x, z); }
+  const waterTex = canvasTex(128, 128, (c, w, h) => { const gr = c.createRadialGradient(w / 2, h / 2, 4, w / 2, h / 2, w / 2); gr.addColorStop(0, '#04182c'); gr.addColorStop(0.7, '#0b3354'); gr.addColorStop(1, '#2a6a8e'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+    c.strokeStyle = 'rgba(160,210,240,0.35)'; c.lineWidth = 2; for (let i = 0; i < 6; i++) { c.beginPath(); c.arc(w / 2, h / 2, 12 + i * 9, 0.3 * i, 0.3 * i + 1.6); c.stroke(); } });
+  const water = new THREE.Mesh(new THREE.ShapeGeometry(vorm).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: waterTex, transparent: true, opacity: 0.96, depthWrite: false }));
+  water.position.y = 0.009; water.renderOrder = 2;
+  const randDelen = [];
+  for (let i = 0; i < 22; i++) {   // brokken ijs langs de rand
+    const a = i / 22 * Math.PI * 2, r = 0.98 + 0.12 * Math.sin(a * 5 + 1);
+    randDelen.push([G.doos, i % 3 ? '#e9f3f8' : '#c4dcea', [Math.cos(a) * r * rx, 0.02, Math.sin(a) * r * rz], [0.3 * Math.sin(i), a + 0.4, 0.25 * Math.cos(i * 1.7)], [0.1 + 0.05 * Math.sin(i * 3), 0.04, 0.07]]);
+  }
+  randDelen.push([G.doos, '#dcebf3', [0.05, 0.012, 0.1], [0, 0.7, 0], [0.12, 0.02, 0.09]], [G.doos, '#dcebf3', [-0.12, 0.012, -0.18], [0, -0.4, 0], [0.09, 0.02, 0.07]]);
+  const rand = new THREE.Mesh(bouw(randDelen), vcMat);
+  // geel waarschuwingsbord 'WAK'
+  const bordTex = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#F6D21D'; c.strokeStyle = '#1b1b1b'; c.lineWidth = 14; c.beginPath(); c.moveTo(w / 2, 14); c.lineTo(w - 12, h - 30); c.lineTo(12, h - 30); c.closePath(); c.fill(); c.stroke();
+    c.fillStyle = '#1b1b1b'; c.font = 'bold 74px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText('WAK', w / 2, h - 62);
+    c.fillRect(w / 2 - 8, 80, 16, 50); c.beginPath(); c.arc(w / 2, 145, 9, 0, Math.PI * 2); c.fill();
+  });
+  const paal = new THREE.Mesh(bouw([[G.cil6, '#7a5230', [0, 0.45, 0], [0, 0, 0], [0.018, 0.9, 0.018]], [G.bolLaag, '#f4f8fc', [0, 0.03, 0], [0, 0, 0], [0.14, 0.05, 0.12]]]), vcMat);
+  const plaat = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.34), new THREE.MeshBasicMaterial({ map: bordTex, transparent: true, side: THREE.DoubleSide })); plaat.position.y = 0.98; plaat.rotation.y = -0.25;
+  const bordje = new THREE.Group(); bordje.add(paal, plaat); bordje.position.set(0.62, 0, 0);
+  g.add(water, rand, bordje); g.position.x = 0.15; return g;
 }
 function maakBrug(hoogte) {
   const g = new THREE.Group(), hout = new THREE.MeshLambertMaterial({ color: 0x7a4a24 });
@@ -320,16 +737,46 @@ function zetBalk(f) {
   balkTex.needsUpdate = true;
 }
 function maakFinish() {
-  const g = new THREE.Group(), wit = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  for (const kant of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.6, 0.12), wit); p.position.set(kant * 1.45, 1.3, 0); g.add(p); }
+  const g = new THREE.Group();
+  const paalMat = new THREE.MeshToonMaterial({ map: streepTex(['#d62828', '#ffffff'], 12), gradientMap: toonGrad });
+  for (const kant of [-1, 1]) {
+    const p = new THREE.Mesh(G.cil, paalMat); p.scale.set(0.06, 2.7, 0.06); p.position.set(kant * 1.45, 1.35, 0); g.add(p);
+    const vlag = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[kant > 0 ? 1 : 0], side: THREE.DoubleSide }));
+    vlag.scale.setScalar(1.6); vlag.position.set(kant * 1.45, 2.62, 0); vlag.rotation.y = kant > 0 ? -0.4 : Math.PI + 0.4; g.add(vlag);
+  }
   const tex = canvasTex(1024, 220, (c, w, h) => {
-    for (let i = 0; i < 16; i++) for (let j = 0; j < 2; j++) { c.fillStyle = (i + j) % 2 ? '#111' : '#fff'; c.fillRect(i * 64, j * 30, 64, 30); }
-    c.fillStyle = '#662A88'; c.fillRect(0, 60, w, 160);
-    c.fillStyle = '#F6F01D'; c.font = 'bold 120px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText('FINISH', w / 2, 185);
+    for (let i = 0; i < 32; i++) for (let j = 0; j < 2; j++) { c.fillStyle = (i + j) % 2 ? '#111' : '#fff'; c.fillRect(i * 32, j * 24, 32, 24); }
+    c.fillStyle = '#21468b'; c.fillRect(0, 48, w, 172);
+    c.fillStyle = '#ffffff'; c.font = 'bold 110px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText('FINISH ' + ROUTE[ROUTE.length - 1].toUpperCase(), w / 2, 175);
   });
-  const doek = new THREE.Mesh(new THREE.PlaneGeometry(2.9, 0.52), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); doek.position.y = 2.4; g.add(doek);
+  const doek = new THREE.Mesh(new THREE.PlaneGeometry(2.9, 0.62), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); doek.position.y = 2.3; g.add(doek);
+  // tribune met juichend publiek, net voorbij de finish
+  const trib = [];
+  for (let i = 0; i < 3; i++) trib.push([G.doos, i % 2 ? '#8a5a2b' : '#9c6a36', [0, 0.15 * (i + 1), 0.3 - i * 0.45], [0, 0, 0], [1.9, 0.3 * (i + 1), 0.45]]);
+  trib.push([G.doos, '#6b4423', [0, 0.7, -0.85], [0, 0, 0], [1.95, 1.4, 0.06]]);
+  const tribune = new THREE.Mesh(bouw(trib), vcMat); tribune.position.set(2.65, 0, -1.2); tribune.rotation.y = -Math.PI / 2; g.add(tribune);
+  g.userData.publiek = [];
+  for (let i = 0; i < 6; i++) {
+    const rij = i % 3, t = maakToeschouwer(i + 3, i === 4 ? 0.75 : 1);
+    t.position.set(2.65 - 0.3 + rij * 0.45, 0.3 + rij * 0.3, -1.2 + (i < 3 ? -0.45 : 0.45) + (rij - 1) * 0.1); t.rotation.y = Math.PI / 2 + 0.5;
+    g.add(t); g.userData.publiek.push(t);
+  }
   return g;
 }
+// het Elfstedenkruisje: je beloning bij de finish
+const kruisje = (() => {
+  const g = new THREE.Group(), vorm = new THREE.Shape(), P = [[-0.14, 0.14], [-0.34, 1], [0.34, 1], [0.14, 0.14], [1, 0.34], [1, -0.34], [0.14, -0.14], [0.34, -1], [-0.34, -1], [-0.14, -0.14], [-1, -0.34], [-1, 0.34]];
+  P.forEach(([x, y], i) => i ? vorm.lineTo(x, y) : vorm.moveTo(x, y)); vorm.closePath();
+  const kruis = new THREE.Mesh(new THREE.ExtrudeGeometry(vorm, { depth: 0.14, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 1 }).translate(0, 0, -0.07),
+    new THREE.MeshToonMaterial({ color: 0xe2e6ec, gradientMap: toonGrad, emissive: 0x30343a }));
+  kruis.scale.setScalar(0.07); g.add(kruis);
+  const mTex = canvasTex(128, 128, (c, w, h) => { c.fillStyle = '#e8c547'; c.beginPath(); c.arc(64, 64, 62, 0, Math.PI * 2); c.fill(); c.strokeStyle = '#a07a1a'; c.lineWidth = 6; c.stroke();
+    c.fillStyle = '#7a5a10'; c.font = 'bold 64px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('11', 64, 68); });
+  for (const z of [0.0125, -0.0125]) { const m = new THREE.Mesh(new THREE.CircleGeometry(0.026, 24), new THREE.MeshBasicMaterial({ map: mTex })); m.position.z = z; if (z < 0) m.rotation.y = Math.PI; g.add(m); }
+  const lint = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.1), new THREE.MeshBasicMaterial({ map: canvasTex(32, 64, (c, w, h) => { ['#0060a8', '#ffffff', '#0060a8', '#ffffff', '#0060a8'].forEach((k, i) => { c.fillStyle = k; c.fillRect(i * w / 5, 0, w / 5 + 1, h); }); }), side: THREE.DoubleSide }));
+  lint.position.y = 0.12; g.add(lint);
+  g.visible = false; scene.add(g); return g;
+})();
 function tekenKaart(g, w, h, stad, gestempeld) {
   g.clearRect(0, 0, w, h);
   g.fillStyle = '#fbf3dc'; g.beginPath(); g.roundRect(4, 4, w - 8, h - 8, 26); g.fill();
@@ -349,10 +796,10 @@ function tekenKaart(g, w, h, stad, gestempeld) {
 // kraampje met stempelaar: je legt je stempelkaart op het vak op de tafel
 function maakKraam(kant, reik, stad) {
   const lengte = base.y / 0.936, zx = kant * reik * lengte, H = Math.max(0.78, D.tafelHoogte * lengte);
-  const g = new THREE.Group(), hout = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+  const g = new THREE.Group(), hout = tm('#8a5a2b');
   const doekTex = canvasTex(128, 128, (c) => { for (let i = 0; i < 8; i++) for (let j = 0; j < 8; j++) { c.fillStyle = (i + j) % 2 ? '#d62828' : '#ffffff'; c.fillRect(i * 16, j * 16, 16, 16); } });
   // tafel
-  const xn = zx - kant * 0.22, xv = zx + kant * 0.26, bx = Math.abs(xv - xn), cx = (xn + xv) / 2;
+  const xn = zx - kant * 0.22, xv = zx + kant * 0.2, bx = Math.abs(xv - xn), cx = (xn + xv) / 2;
   const blad = new THREE.Mesh(new THREE.BoxGeometry(bx, 0.04, 0.9), new THREE.MeshLambertMaterial({ map: doekTex })); blad.position.set(cx, H - 0.02, 0); g.add(blad);
   for (const px of [xn + kant * 0.04, xv - kant * 0.04]) for (const pz of [-0.4, 0.4]) {
     const poot = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, H - 0.04, 6), hout); poot.position.set(px, (H - 0.04) / 2, pz); g.add(poot);
@@ -367,10 +814,11 @@ function maakKraam(kant, reik, stad) {
   const vak = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.17).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: vakTex, transparent: true, depthWrite: false }));
   vak.rotation.y = -kant * Math.PI / 2; vak.position.set(zx, H + 0.004, 0); g.add(vak);
   // de stempelaar achter de tafel, naar je toe gedraaid
-  const st = maakMaatje(K.donker, 0xd62828, K.blauw);
-  st.rotation.y = kant * Math.PI / 2; st.position.set(zx + kant * 0.45, 0, kant * 0.21);
-  st.userData.romp.rotation.x = -0.35; st.userData.armL.rotation.set(0.5, 0, -0.1);
+  const st = maakFiguur({ trui: '#215C9A', band: '#f2efe6', accent: '#d62828', muts: ['#d62828', '#ffffff'], sjaal: '#43BFFD', kousen: ['#3b3f4a', '#3b3f4a'], schaatsen: false, huid: '#e8b896' });
+  st.rotation.y = kant * Math.PI / 2; st.position.set(zx + kant * 0.36, -0.025, kant * 0.21);
+  poseerFiguur(st, { s: 0, hurk: 0.12, buk: 0.15 });
   g.add(st);
+  const stSchaduw = maakSchaduw(0.32); stSchaduw.position.set(zx + kant * 0.36, 0.012, 0); g.add(stSchaduw);
   // de stempel
   const stempel = new THREE.Group();
   const blok = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.06), new THREE.MeshLambertMaterial({ color: 0x7a1020 })); blok.position.y = 0.015;
@@ -399,10 +847,7 @@ function zetStempelaar(kr) {
   u.stempel.position.lerpVectors(u.rust, u.raak, u.s);
   kr.updateMatrixWorld(true);
   const greep = u.stempel.localToWorld(new THREE.Vector3(0, 0.12, 0));
-  const arm = u.st.userData.armR, romp = u.st.userData.romp;
-  const r = romp.worldToLocal(greep).sub(arm.position);
-  arm.rotation.set(Math.atan2(-r.z, -r.y), 0, 0);
-  arm.scale.y = Math.min(1.5, Math.max(0.6, r.length() / 0.5));
+  armNaar(u.st.userData.armR, 1, u.st.userData.romp.worldToLocal(greep));
 }
 
 // ---------- Digitale handen + stempelkaart ----------
@@ -449,12 +894,12 @@ function updateHanden(frame, ref) {
       const duim = pos['thumb-tip'] || pos['index-finger-tip'];
       const mid = pos['index-finger-tip'].clone().add(duim).multiplyScalar(0.5);
       const richting = mid.clone().sub(pos.wrist).normalize();
-      info[kant] = { kaartPos: mid.addScaledVector(richting, 0.04), kaartQ: polsQ.clone().multiply(kaartPlat) };
+      info[kant] = { kaartPos: mid.addScaledVector(richting, 0.04), kaartQ: polsQ.clone().multiply(kaartPlat), pols: pos.wrist };
     } else if (bron.gripSpace) {
       const gp = frame.getPose(bron.gripSpace, ref);
       if (gp && !gp.emulatedPosition) {
         const t = gp.transform.position, o = gp.transform.orientation, q = new THREE.Quaternion(o.x, o.y, o.z, o.w);
-        info[kant] = { kaartPos: new THREE.Vector3(t.x, t.y, t.z).add(new THREE.Vector3(0, 0, -0.08).applyQuaternion(q)), kaartQ: q.clone().multiply(kaartPlat) };
+        info[kant] = { kaartPos: new THREE.Vector3(t.x, t.y, t.z).add(new THREE.Vector3(0, 0, -0.08).applyQuaternion(q)), kaartQ: q.clone().multiply(kaartPlat), pols: new THREE.Vector3(t.x, t.y, t.z) };
       }
     }
   }
@@ -480,7 +925,7 @@ function kaartHand(info, voorkeur) {
 }
 
 function pasBochtToe() {
-  const sleutel = bochtK + '|' + bochtD0;
+  const sleutel = bochtK + '|' + bochtD0 + '|' + bochtS;
   if (sleutel !== bochtVorig) {
     bochtVorig = sleutel;
     for (const m of buigbaar) {
@@ -506,7 +951,7 @@ function maakBochtBorden(richting) {
   const g = new THREE.Group();
   for (let i = 0; i < 4; i++) {
     const b = new THREE.Group();
-    const paal = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 6), paalMat); paal.position.y = 0.45;
+    const paal = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 6), tm('#e8e2d4')); paal.position.y = 0.45;
     const plaat = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); plaat.position.y = 0.95;
     b.add(paal, plaat); g.add(b);
   }
@@ -558,7 +1003,7 @@ let fase = 'opstellen', faseT = 0, stap = 0, ritT = 0, pauzeVan = null;
 let base = null, anker = null, stilT = 0;
 let v = 0, afstand = 0, kant = 0, slagen = 0, laatsteSlag = -9, slagenUitleg = 0;
 let opdrIndex = 0, opdr = null, resultaten = [], log = [], gebeurtenissen = [], zitT = 0, staT = 0;
-let aanmoedigT = 0, langzaamT = 0, ritBasisY = 1.6, ritten = [], volgendeT = 0, reikAfst = null;
+let aanmoedigT = 0, langzaamT = 0, ritBasisY = 1.6, ritten = [], volgendeT = 0, reikAfst = null, laatsteKeuze = 1, routeHerinner = null;
 function gebeurtenis(type, extra = {}) { gebeurtenissen.push({ t: +tijd.toFixed(2), type, ...extra }); }
 
 function zetBase(p, q) {
@@ -568,6 +1013,8 @@ function zetBase(p, q) {
   wereld.position.set(p.x, 0, p.z); wereld.rotation.y = Math.atan2(-vooruit.x, -vooruit.y); wereld.visible = true;
   base.wolkY = Math.max(p.y + 0.3, 1.95);
   bord.position.set(1.1, Math.max(p.y - 0.15, 1.1), -2.2); bord.rotation.y = -0.35; bord.userData.x0 = 1.1;
+  if (!bord.userData.paal) { bord.userData.paal = new THREE.Mesh(G.cil6, tm('#5a3a1e')); bord.add(bord.userData.paal); }
+  bord.userData.paal.scale.set(0.025, bord.position.y - 0.08, 0.025); bord.userData.paal.position.set(0, -(bord.position.y + 0.08) / 2, -0.01);
   gebeurtenis('opgesteld', { y: +p.y.toFixed(3) });
 }
 function handenInBeeld(frame, ref) {
@@ -606,7 +1053,7 @@ function update(p, q, frame, ref, dt) {
   if (fase === 'rit' && rustig) ritBasisY += (p.y - ritBasisY) * Math.min(1, dt / 3);
   const daalRel = ritBasisY - p.y;
 
-  let doelPose = { lean: 0, buk: 0, rug: 0, juich: 0, zij: 0, reik: 0 };
+  let doelPose = { lean: 0, buk: 0, rug: 0, juich: 0, zij: 0, reik: 0, draai: 0 };
   const actief = tijd - laatsteSlag < 2;
   const eigenRitme = Math.sin(tijd * Math.PI * 2 / 1.8) * 0.9;
   doelPose.lean = actief ? Math.max(-1, Math.min(1, lat / 0.08)) : 0;
@@ -618,7 +1065,7 @@ function update(p, q, frame, ref, dt) {
       break;
     }
     case 'uitleg': {
-      if (stap === 0) { zetWolk('Hoi! Ik schaats met je mee.'); doelPose.juich = faseT < 1.5 ? 1 : 0; if (faseT > 3.5) { stap = 1; faseT = 0; slagenUitleg = 0; geluid.wolk(); } }
+      if (stap === 0) { zetWolk('Hoi! Ik schaats met je mee.'); doelPose.draai = faseT < 2.6 ? 1 : 0; doelPose.juich = faseT > 0.4 && faseT < 1.8 ? 1 : 0; if (faseT > 3.5) { stap = 1; faseT = 0; slagenUitleg = 0; geluid.wolk(); } }
       else if (stap === 1) {
         zetWolk(slagenUitleg === 0 ? 'Gewicht naar links… en naar rechts!' : `Schaatsslag ${slagenUitleg} van 4. Ga door!`);
         if (!actief) doelPose.lean = eigenRitme;   // maatje doet het voor
@@ -628,7 +1075,7 @@ function update(p, q, frame, ref, dt) {
         zetWolk('Top! Zo schaatsen we.'); doelPose.juich = 1;
         if (faseT > 2.5) { stap = 3; faseT = 0; geluid.wolk(); gebeurtenis('route', { route: ROUTE.join('-') }); }
       } else {
-        zetWolk(`Onthoud onze route: ${ROUTE.join(' – ')}`, '#F6F01D');
+        zetWolk(`Onthoud onze route: ${ROUTE.join(' – ')}`, '#F6F01D'); doelPose.draai = faseT < D.routeTijd - 1.2 ? 1 : 0;
         if (faseT > D.routeTijd) { zetWolk('Daar gaan we!'); fase = 'rit'; faseT = 0; ritT = 0; opdrIndex = 0; afstand = 0; resultaten = []; slagen = 0; ritBasisY = p.y; volgendeT = 0; gebeurtenis('rit-start'); }
       }
       break;
@@ -640,6 +1087,11 @@ function update(p, q, frame, ref, dt) {
       // opdracht starten
       if (!opdr && opdrIndex < OPDRACHTEN.length && ritT >= Math.max(OPDRACHTEN[opdrIndex].t, volgendeT)) {
         opdr = { ...OPDRACHTEN[opdrIndex], start: ritT, klaar: false, gelukt: false, hold: 0, terug: false };
+        if (opdr.naSplits) {   // bocht direct na een splitsing: de kant die je koos, zonder aanloop
+          opdr.richting = laatsteKeuze; opdr.start = ritT - NADER;
+          opdr.aankondiging = laatsteKeuze < 0 ? 'Bocht naar links! Leun mee' : 'Bocht naar rechts! Leun mee';
+          opdr.naam += laatsteKeuze < 0 ? ' (links)' : ' (rechts)';
+        }
         plaatsObject(opdr.id === 'wak' ? maakWak() : opdr.id === 'brug' ? maakBrug(Math.max(1.0, base.y + 0.02)) : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : opdr.id === 'bocht' ? maakBochtBorden(opdr.richting) : opdr.id === 'splits' ? maakSplitsing(opdr.stad, opdr.anders, opdr.juist = Math.random() < 0.5 ? -1 : 1) : maakWind());
         zetWolk(opdr.aankondiging, '#EB69BB'); geluid.wolk(); gebeurtenis('opdracht', { id: opdr.id });
       }
@@ -652,7 +1104,7 @@ function update(p, q, frame, ref, dt) {
         if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
         if (opdr.id === 'wind' && !opdr.klaar) doelPose.rug = 1;
         if (opdr.id === 'splits') doelPose.zij = -0.5;   // maatje schuift opzij zodat de wegwijzer goed te zien is
-        const gelukt = () => { opdr.klaar = true; opdr.gelukt = true; opdr.klaarT = ot; geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +(opdr.reactie ?? ot).toFixed(2), ...(opdr.detail || {}) }); };
+        const gelukt = () => { opdr.klaar = true; opdr.gelukt = true; opdr.klaarT = ot; juichT = tijd; geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +(opdr.reactie ?? ot).toFixed(2), ...(opdr.detail || {}) }); };
         const mislukt = () => { opdr.klaar = true; opdr.klaarT = ot; geluid.mis(); zetWolk(opdr.mis); gebeurtenis('mislukt', { id: opdr.id, ...(opdr.detail || {}) }); };
         if (!opdr.klaar) {
           if (opdr.id === 'stempel') {
@@ -707,7 +1159,7 @@ function update(p, q, frame, ref, dt) {
           } else if (opdr.id === 'bocht') {
             // de bocht komt in NADER seconden naar je toe, daarna zit je er middenin
             const r = opdr.richting;
-            bochtK = r * D.bochtK;
+            bochtK += (r * D.bochtK - bochtK) * Math.min(1, dt * 2);
             if (ot < NADER) { bochtD0 = 14 * (1 - ot / NADER); if (ot > NADER - 2) doelPose.lean = r; }
             else {
               bochtD0 = 0;
@@ -735,12 +1187,12 @@ function update(p, q, frame, ref, dt) {
               if (kant !== 0 && kant === opdr.kantNu) opdr.hold += dt; else { opdr.hold = 0; opdr.kantNu = kant; }
               const naam = k => (k === opdr.juist ? opdr.stad : opdr.anders);
               if (opdr.hold >= D.stapTijd) {
-                opdr.reactie = ot - opdr.nuT - D.stapTijd; opdr.keuze = kant;
+                opdr.reactie = ot - opdr.nuT - D.stapTijd; opdr.keuze = laatsteKeuze = kant;
                 opdr.detail = { keuze: kant === opdr.juist ? 'goed' : 'fout', kant: kant < 0 ? 'links' : 'rechts', juisteKant: opdr.juist < 0 ? 'links' : 'rechts', gekozen: naam(kant) };
                 if (kant === opdr.juist) gelukt();
-                else { mislukt(); zetWolk(`Oei, dit is ${opdr.anders}! We keren om naar ${opdr.stad}`, '#EB69BB'); }
+                else { mislukt(); zetWolk(`Oei, dit is ${opdr.anders}! We steken over naar ${opdr.stad}`, '#EB69BB'); }
               } else if (ot > NADER + 0.3) {
-                opdr.keuze = opdr.juist; opdr.detail = { keuze: 'te laat', juisteKant: opdr.juist < 0 ? 'links' : 'rechts' };
+                opdr.keuze = laatsteKeuze = opdr.juist; opdr.detail = { keuze: 'te laat', juisteKant: opdr.juist < 0 ? 'links' : 'rechts' };
                 mislukt(); zetWolk(`Te laat! We gaan naar ${opdr.stad}`, '#EB69BB');
               }
             }
@@ -766,15 +1218,16 @@ function update(p, q, frame, ref, dt) {
           let klaarVoorVolgende = ot - opdr.klaarT > 3 && ot > NADER + 2;
           if (opdr.id === 'bocht') zetBalk(ot - opdr.klaarT < 1 && opdr.gelukt ? 1 : null);
           if (opdr.id === 'splits') {
-            const na = ot - NADER;   // tijd sinds de punt van de splitsing bij je is
-            const omhul = na < 0 ? 0 : na < 1.5 ? na / 1.5 : Math.max(0, 1 - (na - 1.5) / 2);
-            bochtD0 = 0; bochtK = opdr.keuze * D.splitsK * 0.6 * omhul;
-            if (!opdr.gelukt && ot - opdr.klaarT > 2.5 && opdr.stad !== ROUTE[ROUTE.length - 1]) zetWolk(`Onthoud: ${ROUTE.slice(ROUTE.indexOf(opdr.stad)).join(' – ')}`, '#F6F01D');
-            else if (opdr.gelukt && Math.abs(lat) > 0.12 && ot - opdr.klaarT > 2) zetWolk('Kom maar weer terug naar het midden');
-            klaarVoorVolgende = ot > NADER + 4 && ot - opdr.klaarT > 4;
+            // na je keuze buigt de hele baan voorbij de punt mee de gekozen baan in; daarna volgt meteen een bocht
+            bochtD0 = Math.max(0, -object.position.z);
+            bochtK += (opdr.keuze * D.splitsK - bochtK) * Math.min(1, dt * 4);
+            bochtS += (opdr.keuze * D.splitsOpzij - bochtS) * Math.min(1, dt * 4);
+            routeHerinner = !opdr.gelukt && opdr.stad !== ROUTE[ROUTE.length - 1] ? `Onthoud: ${ROUTE.slice(ROUTE.indexOf(opdr.stad)).join(' – ')}` : null;
+            klaarVoorVolgende = ot > NADER + 0.2 && ot - opdr.klaarT > 1.2;
           }
           if (opdr.id === 'bocht') {   // de baan wordt weer recht
             bochtD0 = 0; bochtK = opdr.richting * D.bochtK * Math.max(0, 1 - (ot - opdr.klaarT) / 3);
+            if (routeHerinner && ot - opdr.klaarT > 1.5) { zetWolk(routeHerinner, '#F6F01D'); klaarVoorVolgende = ot - opdr.klaarT > 4.5; }
             object.userData.scroll += v * dt; zetBochtBorden(object);
           }
           if (opdr.id === 'stempel') {   // het kraampje blijft staan tot je weer wegschaatst
@@ -792,7 +1245,11 @@ function update(p, q, frame, ref, dt) {
           }
           if (klaarVoorVolgende) {
             resultaten.push({ naam: opdr.naam, gelukt: opdr.gelukt, reactie: opdr.reactie !== undefined ? +opdr.reactie.toFixed(1) : null, ...(opdr.detail ? { detail: opdr.detail } : {}) });
-            toonResultaten(); plaatsObject(null); kaart.visible = false; kaartStaat = null; bochtK = 0; bochtD0 = 0; zetBalk(null); opdr = null; opdrIndex++; zetWolk(null); volgendeT = ritT + D.pauzeTussen;
+            const doorNaarBocht = OPDRACHTEN[opdrIndex + 1] && OPDRACHTEN[opdrIndex + 1].naSplits;
+            if (opdr.id === 'bocht') routeHerinner = null;
+            toonResultaten(); plaatsObject(null); kaart.visible = false; kaartStaat = null; zetBalk(null); opdr = null; opdrIndex++;
+            if (doorNaarBocht) volgendeT = ritT;   // de baan buigt gewoon door: geen pauze, wolkje blijft staan
+            else { bochtK = 0; bochtD0 = 0; bochtS = 0; zetWolk(null); volgendeT = ritT + D.pauzeTussen; }
           }
         }
       } else {
@@ -809,7 +1266,7 @@ function update(p, q, frame, ref, dt) {
         if (ritT - object.userData.start > NADER) {
           fase = 'einde'; faseT = 0; geluid.finish();
           const n = resultaten.filter(r => r.gelukt).length;
-          zetWolk(`Gefinisht in ${ROUTE[ROUTE.length - 1]}! ${n} van de ${OPDRACHTEN.length} gelukt.`, '#F6F01D'); gebeurtenis('finish', { score: n, slagen, afstand: Math.round(afstand) });
+          zetWolk(`Gefinisht in ${ROUTE[ROUTE.length - 1]}! ${n} van de ${OPDRACHTEN.length} gelukt. Hier is je kruisje!`, '#F6F01D'); juichT = tijd; gebeurtenis('finish', { score: n, slagen, afstand: Math.round(afstand) });
           ritten.push({ score: n, slagen, afstand: Math.round(afstand), resultaten: [...resultaten] });
           toonResultaten();
         }
@@ -821,9 +1278,9 @@ function update(p, q, frame, ref, dt) {
       if (staT > 1.0) { fase = pauzeVan; gebeurtenis('hervat'); zetWolk('We gaan verder!'); }
       break;
     case 'einde':
-      doelPose.juich = 1;
+      doelPose.juich = 1; doelPose.draai = faseT > 1 ? 1 : 0;
       if (faseT > 4) zetWolk('Knijp om nog een keer te rijden.');
-      if (knijp) { knijp = false; plaatsObject(null); fase = 'uitleg'; stap = 2; faseT = 0; }
+      if (knijp) { knijp = false; plaatsObject(null); fase = 'uitleg'; stap = 2; faseT = 0; bochtK = 0; bochtD0 = 0; bochtS = 0; }
       break;
   }
   knijp = false;
@@ -833,8 +1290,11 @@ function update(p, q, frame, ref, dt) {
   const inBocht = opdr && opdr.id === 'bocht' && opdr.nu && !opdr.klaar;   // in de bocht houd je je vaart
   if (!inBocht) v *= Math.exp(-dt / D.remTijd); if (stilstaan) v *= Math.exp(-dt * 3);
   if (fase === 'rit') afstand += v * dt;
-  ijsTex.offset.y += v * dt / 2;
+  ijsTex.offset.y += v * dt / 2.5;
   for (const paal of palen) { paal.position.z += v * dt; if (paal.position.z > 1.5) paal.position.z -= 30; }
+  wapperVlaggen(tijd); updateDecor(dt, v, tijd); updateSneeuw(dt, v, tijd);
+  if (object && object.userData.publiek) for (const t of object.userData.publiek) zetToeschouwer(t, tijd, true);
+  if (!(opdr && opdr.id === 'splits' && opdr.klaar)) bochtS *= Math.exp(-dt / 1.2);
   if (object && object.isLineSegments) {   // windstrepen
     const arr = object.geometry.attributes.position.array;
     object.userData.p.forEach((s, i) => { s.z += (6 + v) * dt; if (s.z > 1) s.z = -12; arr.set([s.x, s.y, s.z, s.x, s.y, s.z - 0.5], i * 6); });
@@ -842,9 +1302,18 @@ function update(p, q, frame, ref, dt) {
   }
   if (ijsGeluid) ijsGeluid.gain.value = Math.min(0.05, v * 0.01);
   poseerMaatje(tijd, doelPose, dt);
-  maatje.position.x += bochtX(2.6);
+  maatje.position.x += bochtX(2.6); maatjeSchaduw.position.x = maatje.position.x;
   pasBochtToe();
   if (object && object.userData.kraam) zetStempelaar(object);
+  updateLijf(p, q, { left: handInfo.left && handInfo.left.pols, right: handInfo.right && handInfo.right.pols }, lat, dt);
+  // het Elfstedenkruisje zweeft voor je bij de finish
+  kruisje.visible = fase === 'einde' && faseT > 1.2;
+  if (kruisje.visible) {
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; f.normalize();
+    kruisje.position.set(p.x + f.x * 0.55, p.y - 0.18 + 0.02 * Math.sin(tijd * 2), p.z + f.z * 0.55);
+    kruisje.rotation.set(0, Math.atan2(-f.x, -f.z) + Math.sin(tijd * 1.3) * 0.5, 0);
+    kruisje.scale.setScalar(Math.min(1, (faseT - 1.2) * 2));
+  }
 
   // wolkje boven het maatje (of voor je tijdens het opstellen), altijd naar je toe gedraaid
   if (base) { wereld.updateMatrixWorld(); wolk.position.copy(wereld.localToWorld(new THREE.Vector3(maatje.position.x, base.wolkY, -2.6))); }
@@ -869,23 +1338,38 @@ function voorbeeld(t) {
     scene.background = new THREE.Color(0x8a8f96);
     camera.aspect = innerWidth / innerHeight; camera.fov = 75; camera.updateProjectionMatrix();
     camera.position.set(0, 1.67, 0); zetBase({ x: 0, y: 1.67, z: 0 }, new THREE.Quaternion());
+    if (VB.has('derde')) { camera.position.set(1.1, 2.0, 2.0); camera.lookAt(0, 1.0, -1.5); }
+    if (VB.has('geensneeuw')) sneeuw.visible = false;
     const o = VB.get('opdr');
     if (o === 'splits') plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1));
+    else if (o === 'splitsbocht') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); bochtK = D.splitsK; bochtS = D.splitsOpzij; }
+    else if (o === 'kruisje') { kruisje.visible = true; kruisje.position.set(0, 1.5, -0.6); kruisje.scale.setScalar(1); }
     else if (o === 'bocht' || o === 'bocht-rechts') { const r = o === 'bocht' ? -1 : 1; plaatsObject(maakBochtBorden(r)); bochtK = r * D.bochtK; bochtD0 = 3; }
     else if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.58 : 0.66, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
     else if (o === 'wak') plaatsObject(maakWak()); else if (o === 'brug') plaatsObject(maakBrug(1.69)); else if (o === 'wind') plaatsObject(maakWind()); else if (o === 'finish') plaatsObject(maakFinish());
     if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? -4 : -5;
+    if (o === 'splitsbocht') bochtD0 = 4;
     if (o && o.startsWith('bocht')) zetBalk(0.6);
     const opd = o === 'stempel-links' ? OPDRACHTEN.find(x => x.stad === 'IJlst') : o === 'bocht-rechts' ? OPDRACHTEN.find(x => x.richting === 1) : OPDRACHTEN.find(x => x.id === o);
     zetWolk(o === 'splits' ? 'Welke kant? Stap!' : opd ? opd.aankondiging : o === 'finish' ? 'De finish komt eraan!' : 'Lekker tempo!');
   }
   const o = VB.get('opdr');
-  poseerMaatje(t / 1000, { lean: o ? 0 : Math.sin(t / 1000 * Math.PI * 2 / 1.8), buk: o === 'brug' ? 1 : 0, rug: o === 'wind' ? 1 : 0, juich: 0, zij: o === 'wak' ? -0.35 : 0, reik: o === 'stempel' ? 1 : o === 'stempel-links' ? -1 : 0 }, dt);
-  if (object && object.userData.bocht) { maatje.position.x += bochtX(2.6); object.userData.scroll += 2.5 * dt; zetBochtBorden(object); }
+  const ts = t / 1000, vv = VB.has('stil') ? 0 : 2.5;
+  poseerMaatje(ts, { lean: o && o !== 'decor' ? 0 : Math.sin(ts * Math.PI * 2 / 1.8), buk: o === 'brug' ? 1 : 0, rug: o === 'wind' ? 1 : 0, juich: o === 'finish' ? 1 : 0, zij: o === 'wak' ? -0.35 : 0, reik: o === 'stempel' ? 1 : o === 'stempel-links' ? -1 : 0, draai: VB.has('draai') ? 1 : 0 }, dt);
+  maatje.position.x += bochtX(2.6); maatjeSchaduw.position.x = maatje.position.x;
+  if (object && object.userData.bocht) { object.userData.scroll += vv * dt; zetBochtBorden(object); }
+  if (object && object.userData.publiek) for (const p of object.userData.publiek) zetToeschouwer(p, ts, true);
+  if (o === 'kruisje') kruisje.rotation.y = Math.sin(ts * 1.3) * 0.5;
+  wapperVlaggen(ts); updateDecor(dt, vv, ts); updateSneeuw(dt, vv, ts);
+  if (VB.has('derde')) {   // eigen lijf testen: nep-hoofd en nep-polsen
+    const hy = 1.67 - (VB.has('hurk') ? 0.25 : 0) + 0.03 * Math.sin(ts * 3.4), hx = 0.06 * Math.sin(ts * 3.4);
+    const q0 = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.4, 0.3 * Math.sin(ts * 0.5), 0, 'YXZ'));
+    updateLijf({ x: hx, y: hy, z: 0 }, q0, { left: new THREE.Vector3(-0.32 + hx, hy - 0.55, -0.25), right: new THREE.Vector3(0.3 + hx, hy - 0.35 + 0.1 * Math.sin(ts * 2), -0.45) }, hx, dt);
+  }
   pasBochtToe();
   if (object && object.userData.kraam) { object.userData.s = Math.max(0, Math.sin(t / 1000 * 2.5)); zetStempelaar(object); if (VB.has('kaart')) kaartOpTafel(object); }
-  ijsTex.offset.y += 2.5 * dt / 2;
-  for (const paal of palen) { paal.position.z += 2.5 * dt; if (paal.position.z > 1.5) paal.position.z -= 30; }
+  ijsTex.offset.y += vv * dt / 2.5;
+  for (const paal of palen) { paal.position.z += vv * dt; if (paal.position.z > 1.5) paal.position.z -= 30; }
   wereld.updateMatrixWorld(); wolk.position.copy(wereld.localToWorld(new THREE.Vector3(maatje.position.x, base.wolkY, -2.6))); wolk.lookAt(0, wolk.position.y, 0);
   if (balk.visible) { balk.position.copy(wolk.position); balk.position.y -= 0.27; balk.quaternion.copy(wolk.quaternion); }
   tekenBord('120 m', `opdracht 1/${OPDRACHTEN.length} · 9 km/u`);
@@ -950,12 +1434,14 @@ startKnop.addEventListener('click', async () => {
     sessie.addEventListener('select', () => { knijp = true; });
     sessie.addEventListener('end', () => {
       vorigeT = null; wereld.visible = false; plaatsObject(null); zetWolk(null); kaart.visible = false; for (const k in handVis) handVis[k].g.visible = false;
+      lijf.visible = lijfSchaduw.visible = kruisje.visible = false;
       if (ijsGeluid) ijsGeluid.gain.value = 0;
       startKnop.textContent = 'Opnieuw starten'; downloadKnop.hidden = log.length === 0;
       status.textContent = resultaten.length ? 'Resultaten van de proefrit:' : '';
     });
     base = null; anker = null; stilT = 0; fase = 'opstellen'; faseT = 0; v = 0; afstand = 0; slagen = 0; kant = 0;
     opdr = null; opdrIndex = 0; volgendeT = 0; reikAfst = null; kaartStaat = null; kaart.visible = false; bochtK = 0; bochtD0 = 0; zetBalk(null); resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
+    lijfAan = document.getElementById('optLijf').checked; sneeuw.visible = document.getElementById('optSneeuw').checked; kruisje.visible = false; bochtS = 0;
     zetWolk('Sta even stil en kijk recht vooruit');
     await renderer.xr.setSession(sessie);
     status.textContent = '';
