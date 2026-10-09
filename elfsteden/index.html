@@ -51,12 +51,12 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.9</div>
+  <div id="versie">versie 0.10</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.9';
+const VERSIE = '0.10';
 
 // ---------- Instellingen ----------
 const D = {
@@ -83,7 +83,7 @@ const D = {
   bochtDuur: 8,          // zo lang duurt de bocht
   // splitsing: route onthouden en met een stap de juiste kant kiezen
   kiesTijd: 3,           // zoveel seconden bedenktijd voordat je bij de splitsing bent
-  splitsK: 0.04,         // hoe sterk de twee banen uit elkaar lopen (daarna buigt de baan zo verder)
+  splitsK: 0.05,         // hoe sterk de twee banen uit elkaar lopen (de gekozen baan buigt daarna zo verder)
   splitsOpzij: 0.55,     // midden van de gekozen baan t.o.v. het midden van de hoofdbaan
   routeTijd: 6           // zo lang toont het maatje de route bij de start
 };
@@ -211,7 +211,7 @@ for (const kant of [-1, 1]) {
     pos.setY(i, Math.max(0, bult));
   }
   geo.computeVertexNormals();
-  const s = new THREE.Mesh(geo, sneeuwMat); s.position.set(kant * 1.5, 0.004, -BAAN_L / 2 + 0.9); wereld.add(s); buigbaar.push(s);
+  const s = new THREE.Mesh(geo, sneeuwMat); s.position.set(kant * 1.5, 0.004, -BAAN_L / 2 + 0.9); s.userData.kant = kant; wereld.add(s); buigbaar.push(s);
 }
 // dennentakken in de sneeuw langs de baan; op elke derde een vlaggetje (Nederland / Friesland)
 const takGeo = bouw([
@@ -736,21 +736,29 @@ function maakWind() {
   lijnen.frustumCulled = false; return lijnen;
 }
 // splitsing: twee banen lopen uit elkaar, met een wegwijzer op de punt
+// splitsing als een Y: vanaf het splitspunt (dDiv meter vóór je) buigen twee volle banen uit elkaar.
+// Na je keuze ís de gekozen baan gewoon de hoofdbaan (die buigt precies zo); de andere baan buigt weg en schuift voorbij.
+const VORK_L = 18, VORK_N = 36;
+const vorkIjsTex = ijsTex.clone(); vorkIjsTex.repeat.set(1, 1); vorkIjsTex.offset.set(0, 0);
+const vorkSneeuwMat = new THREE.MeshLambertMaterial({ color: 0xf3f7fc, emissive: 0x9fb4c8, emissiveIntensity: 0.35, side: THREE.DoubleSide });
+function rasterGeo(nu, ns, vSchaal = 0) {
+  const g = new THREE.BufferGeometry(), n = (nu + 1) * (ns + 1), uv = new Float32Array(n * 2), idx = [];
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  for (let j = 0; j <= ns; j++) for (let i = 0; i <= nu; i++) { const k = j * (nu + 1) + i; uv[k * 2] = i / nu; uv[k * 2 + 1] = vSchaal ? j / ns * VORK_L / vSchaal : j / ns; }
+  for (let j = 0; j < ns; j++) for (let i = 0; i < nu; i++) { const a = j * (nu + 1) + i, b = a + 1, c = a + nu + 1, d = c + 1; idx.push(a, b, c, b, d, c); }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(idx); return g;
+}
 function maakSplitsing(stad, anders, juist) {
-  const g = new THREE.Group(), L = 14, N = 30, k = D.splitsK;
-  const buig = (geo, f) => { const pos = geo.attributes.position; for (let i = 0; i < pos.count; i++) { const x0 = pos.getX(i), afst = -pos.getZ(i); pos.setX(i, f(x0, afst)); } pos.needsUpdate = true; };
-  const baanMat = new THREE.MeshBasicMaterial({ map: ijsTex, transparent: true, opacity: 0.92, depthWrite: false });
-  for (const kant of [-1, 1]) {
-    const geo = new THREE.PlaneGeometry(1.0, L, 1, N).rotateX(-Math.PI / 2).translate(0, 0, -L / 2);
-    buig(geo, (x0, afst) => x0 + kant * (0.55 + k * afst * afst / 2));
-    const baan = new THREE.Mesh(geo, baanMat); baan.position.y = 0.007; baan.renderOrder = 1; g.add(baan);
-  }
-  const wigGeo = new THREE.PlaneGeometry(1, L, 1, N).rotateX(-Math.PI / 2).translate(0, 0, -L / 2);
-  buig(wigGeo, (x0, afst) => Math.sign(x0) * (0.04 + k * afst * afst / 2));
-  const wig = new THREE.Mesh(wigGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, depthWrite: false }));
-  wig.position.y = 0.009; wig.renderOrder = 2; g.add(wig);
-  // wegwijzer
-  const paal = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.9, 8), new THREE.MeshLambertMaterial({ color: 0xdddddd })); paal.position.set(0, 0.95, -0.3); g.add(paal);
+  const g = new THREE.Group();
+  const baanMat = new THREE.MeshBasicMaterial({ map: vorkIjsTex, transparent: true, opacity: 0.9, depthWrite: false });
+  const mk = (geo, mat, ro) => { const m = new THREE.Mesh(geo, mat); m.frustumCulled = false; m.renderOrder = ro; g.add(m); return m; };
+  const u = { splits: true, dDiv: 14, c: 0, cg: 0,
+    baan: { [-1]: mk(rasterGeo(1, VORK_N, 2.5), baanMat, 1), [1]: mk(rasterGeo(1, VORK_N, 2.5), baanMat, 1) },
+    wal: { [-1]: mk(rasterGeo(6, VORK_N), vorkSneeuwMat, 0), [1]: mk(rasterGeo(6, VORK_N), vorkSneeuwMat, 0) },
+    wig: mk(rasterGeo(6, VORK_N), vorkSneeuwMat, 0) };
+  // wegwijzer op de punt waar de banen loskomen
+  const wijzer = new THREE.Group(); g.add(wijzer); u.wijzer = wijzer;
+  wijzer.add(new THREE.Mesh(bouw([[G.cil6, '#dcdcdc', [0, 1.1, 0], [0, 0, 0], [0.035, 2.2, 0.035]], [G.bolLaag, '#f4f8fc', [0, 0.04, 0], [0, 0, 0], [0.3, 0.1, 0.3]]]), vcMat));
   const bordTex = (naam, pijlLinks) => canvasTex(512, 160, (c, w, h) => {
     c.fillStyle = '#215C9A'; c.beginPath();
     if (pijlLinks) { c.moveTo(4, h / 2); c.lineTo(70, 6); c.lineTo(w - 6, 6); c.lineTo(w - 6, h - 6); c.lineTo(70, h - 6); }
@@ -760,12 +768,38 @@ function maakSplitsing(stad, anders, juist) {
   });
   const links = juist < 0 ? stad : anders, rechts = juist < 0 ? anders : stad;
   for (const [kant, naam] of [[-1, links], [1, rechts]]) {
-    const b = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.28), new THREE.MeshBasicMaterial({ map: bordTex(naam, kant < 0), side: THREE.DoubleSide }));
-    b.position.set(kant * 0.47, 1.75, -0.28); b.rotation.y = -kant * 0.15; g.add(b);
+    const b = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.41), new THREE.MeshBasicMaterial({ map: bordTex(naam, kant < 0), side: THREE.DoubleSide }));
+    b.position.set(kant * 0.68, 2.0, 0.03); b.rotation.y = -kant * 0.12; wijzer.add(b);
   }
-  g.userData = { splits: true };
+  g.userData = u;
+  zetVork(g);
   return g;
 }
+const bult = (t) => Math.sin(Math.PI * t);
+function zetVork(vk) {
+  const u = vk.userData, k = D.splitsK, dDiv = u.dDiv, sLos = Math.sqrt(2 * 1.05 / k);
+  const sAt = j => Math.max(j / VORK_N * VORK_L, -1 - dDiv, 0);   // stukken achter je klappen dicht
+  const baanX = (kant, s) => bochtX(s + dDiv) + (kant - u.cg) * k * s * s / 2;
+  const zet = (m, nu, f) => { const a = m.geometry.attributes.position.array; let q = 0;
+    for (let j = 0; j <= VORK_N; j++) { const sj = sAt(j); for (let i = 0; i <= nu; i++) { const [x, y] = f(sj, i / nu); a[q++] = x; a[q++] = y; a[q++] = -(sj + dDiv); } }
+    m.geometry.attributes.position.needsUpdate = true; };
+  for (const kant of [-1, 1]) {
+    const gekozen = u.c !== 0 && kant === u.c;   // de gekozen kant tekent de hoofdbaan al
+    u.baan[kant].visible = u.wal[kant].visible = !gekozen;
+    if (gekozen) continue;
+    zet(u.baan[kant], 1, (sj, t) => [baanX(kant, sj) + (t * 2 - 1) * 1.05, 0.008]);
+    zet(u.wal[kant], 6, (sj, t) => [baanX(kant, sj) + kant * (1.05 + 0.9 * t), 0.004 + bult(t) * (0.15 + 0.03 * Math.sin(sj * 1.7))]);
+    u.wal[kant].geometry.computeVertexNormals();
+  }
+  zet(u.wig, 6, (sj, t) => { const hw = Math.max(0, k * sj * sj / 2 - 1.05), mid = (baanX(-1, sj) + baanX(1, sj)) / 2;
+    return [mid + (t * 2 - 1) * hw, 0.004 + bult(t) * 0.17 * Math.min(1, hw / 0.45)]; });
+  u.wig.geometry.computeVertexNormals();
+  const sw = sLos + 0.6, afstW = sw + dDiv;
+  u.wijzer.visible = afstW > -1;
+  u.wijzer.position.set((baanX(-1, sw) + baanX(1, sw)) / 2, 0, -afstW);
+}
+let vork = null;   // splitsing die na de keuze nog even voorbij schuift
+const actieveVork = () => vork || (object && object.userData.splits ? object : null);
 // balk die volloopt in de bocht (hangt onder het tekstwolkje)
 const balkCanvas = document.createElement('canvas'); balkCanvas.width = 512; balkCanvas.height = 72;
 const balkTex = new THREE.CanvasTexture(balkCanvas); balkTex.colorSpace = THREE.SRGBColorSpace;
@@ -971,22 +1005,31 @@ function kaartHand(info, voorkeur) {
 }
 
 function pasBochtToe() {
-  const sleutel = bochtK + '|' + bochtD0 + '|' + bochtS;
+  const vk = actieveVork(), vu = vk && vk.userData;
+  const sleutel = bochtK + '|' + bochtD0 + '|' + bochtS + (vu ? '|' + vu.dDiv + '|' + vu.c : '');
   if (sleutel !== bochtVorig) {
     bochtVorig = sleutel;
     for (const m of buigbaar) {
       const pos = m.geometry.attributes.position;
       if (!m.userData.basis) m.userData.basis = Float32Array.from(pos.array);
       const b = m.userData.basis;
-      for (let i = 0; i < pos.count; i++) pos.array[i * 3] = b[i * 3] + bochtX(-(b[i * 3 + 2] + m.position.z));
+      // bij een splitsing houden de sneeuwwallen op bij het splitspunt (na je keuze alleen de wal aan de binnenkant)
+      const knip = vu && m.userData.kant && (vu.c === 0 || m.userData.kant === -vu.c) ? Math.max(0, vu.dDiv) : Infinity;
+      for (let i = 0; i < pos.count; i++) {
+        const afst = Math.min(knip, -(b[i * 3 + 2] + m.position.z));
+        pos.array[i * 3] = b[i * 3] + bochtX(afst); pos.array[i * 3 + 2] = -afst - m.position.z;
+      }
       pos.needsUpdate = true;
     }
   }
-  for (const paal of palen) paal.position.x = paal.userData.x0 + bochtX(-paal.position.z);
+  for (const paal of palen) {
+    paal.position.x = paal.userData.x0 + bochtX(-paal.position.z);
+    if (vu && -paal.position.z > vu.dDiv && (vu.c === 0 || Math.sign(paal.userData.x0) === -vu.c)) paal.visible = false;
+  }
   if (bord.userData.x0 !== undefined) bord.position.x = bord.userData.x0 + bochtX(-bord.position.z);
 }
 // bochtborden (rood-wit, pijlen naar de binnenkant van de bocht) aan de buitenkant
-function maakBochtBorden(richting) {
+function maakBochtBorden(richting, verborgen = false) {
   const tex = canvasTex(256, 128, (c, w, h) => {
     c.fillStyle = '#d62828'; c.fillRect(0, 0, w, h); c.fillStyle = '#ffffff';
     for (let i = 0; i < 3; i++) { const x = 40 + i * 70; c.beginPath();
@@ -1001,7 +1044,7 @@ function maakBochtBorden(richting) {
     const plaat = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.25), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); plaat.position.y = 0.95;
     b.add(paal, plaat); g.add(b);
   }
-  g.userData = { bocht: true, richting, scroll: 0 };
+  g.userData = { bocht: true, richting, scroll: 0 }; g.visible = !verborgen;
   return g;
 }
 function zetBochtBorden(g) {
@@ -1014,7 +1057,7 @@ function zetBochtBorden(g) {
   });
 }
 let object = null;
-function plaatsObject(o) { if (object) wereld.remove(object); object = o; if (o) { if (!o.isLineSegments) o.position.z = -14; wereld.add(o); } }
+function plaatsObject(o) { if (object) wereld.remove(object); object = o; if (o) { if (!o.isLineSegments && !o.userData.splits) o.position.z = -14; wereld.add(o); } }
 
 // ---------- Geluid ----------
 let audio = null, ijsGeluid = null;
@@ -1138,13 +1181,20 @@ function update(p, q, frame, ref, dt) {
           opdr.aankondiging = laatsteKeuze < 0 ? 'Bocht naar links! Leun mee' : 'Bocht naar rechts! Leun mee';
           opdr.naam += laatsteKeuze < 0 ? ' (links)' : ' (rechts)';
         }
-        plaatsObject(opdr.id === 'wak' ? maakWak() : opdr.id === 'brug' ? maakBrug(Math.max(1.0, base.y + 0.02)) : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : opdr.id === 'bocht' ? maakBochtBorden(opdr.richting) : opdr.id === 'splits' ? maakSplitsing(opdr.stad, opdr.anders, opdr.juist = Math.random() < 0.5 ? -1 : 1) : maakWind());
+        plaatsObject(opdr.id === 'wak' ? maakWak() : opdr.id === 'brug' ? maakBrug(Math.max(1.0, base.y + 0.02)) : opdr.id === 'stempel' ? maakKraam(opdr.kant, opdr.reik, opdr.stad) : opdr.id === 'bocht' ? maakBochtBorden(opdr.richting, opdr.naSplits) : opdr.id === 'splits' ? maakSplitsing(opdr.stad, opdr.anders, opdr.juist = Math.random() < 0.5 ? -1 : 1) : maakWind());
         zetWolk(opdr.aankondiging, '#EB69BB'); geluid.wolk(); gebeurtenis('opdracht', { id: opdr.id });
       }
       if (opdr) {
         const ot = ritT - opdr.start;
         const zObj = -14 + Math.min(ot, NADER + 2) * (14 / NADER);   // 0 = bij jou, maatje staat op -2,6
-        if (opdr.id !== 'wind' && opdr.id !== 'stempel' && opdr.id !== 'bocht') object.position.z = zObj;
+        if (opdr.id !== 'wind' && opdr.id !== 'stempel' && opdr.id !== 'bocht' && opdr.id !== 'splits') object.position.z = zObj;
+        if (opdr.id === 'splits') {   // het splitspunt komt naar je toe; na je keuze glijdt de baan soepel de gekozen kant op
+          const u = object.userData;
+          if (ot <= NADER) u.dDiv = 14 * (1 - ot / NADER); else u.dDiv -= Math.max(v, 2) * dt;
+          if (opdr.keuze !== undefined) u.c = opdr.keuze;
+          u.cg += (u.c - u.cg) * Math.min(1, dt * 3);
+          bochtK = u.cg * D.splitsK; bochtD0 = Math.max(0, u.dDiv);
+        }
         // het maatje doet het voor op het moment dat het object bij hém is
         if (opdr.id === 'wak') doelPose.zij = (zObj > -4.2 && zObj < -1.2) ? -0.35 : 0;
         if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
@@ -1265,9 +1315,6 @@ function update(p, q, frame, ref, dt) {
           if (opdr.id === 'bocht') zetBalk(ot - opdr.klaarT < 1 && opdr.gelukt ? 1 : null);
           if (opdr.id === 'splits') {
             // na je keuze buigt de hele baan voorbij de punt mee de gekozen baan in; daarna volgt meteen een bocht
-            bochtD0 = Math.max(0, -object.position.z);
-            bochtK += (opdr.keuze * D.splitsK - bochtK) * Math.min(1, dt * 4);
-            bochtS += (opdr.keuze * D.splitsOpzij - bochtS) * Math.min(1, dt * 4);
             routeHerinner = !opdr.gelukt && opdr.stad !== ROUTE[ROUTE.length - 1] ? `Onthoud: ${ROUTE.slice(ROUTE.indexOf(opdr.stad)).join(' – ')}` : null;
             klaarVoorVolgende = ot > NADER + 0.2 && ot - opdr.klaarT > 1.2;
           }
@@ -1293,6 +1340,7 @@ function update(p, q, frame, ref, dt) {
             resultaten.push({ naam: opdr.naam, gelukt: opdr.gelukt, reactie: opdr.reactie !== undefined ? +opdr.reactie.toFixed(1) : null, ...(opdr.detail ? { detail: opdr.detail } : {}) });
             const doorNaarBocht = OPDRACHTEN[opdrIndex + 1] && OPDRACHTEN[opdrIndex + 1].naSplits;
             if (opdr.id === 'bocht') routeHerinner = null;
+            if (opdr.id === 'splits') { if (vork) wereld.remove(vork); vork = object; vork.userData.cg = vork.userData.c; object = null; }   // de splitsing schuift nog even voorbij
             toonResultaten(); plaatsObject(null); kaart.visible = false; kaartStaat = null; zetBalk(null); opdr = null; opdrIndex++;
             if (doorNaarBocht) volgendeT = ritT;   // de baan buigt gewoon door: geen pauze, wolkje blijft staan
             else { bochtK = 0; bochtD0 = 0; bochtS = 0; zetWolk(null); volgendeT = ritT + D.pauzeTussen; }
@@ -1326,7 +1374,7 @@ function update(p, q, frame, ref, dt) {
     case 'einde':
       doelPose.juich = 1; doelPose.draai = faseT > 1 ? 1 : 0;
       if (faseT > 4) zetWolk('Knijp om nog een keer te rijden.');
-      if (knijp) { knijp = false; plaatsObject(null); fase = 'uitleg'; stap = 2; faseT = 0; bochtK = 0; bochtD0 = 0; bochtS = 0; }
+      if (knijp) { knijp = false; plaatsObject(null); fase = 'uitleg'; stap = 2; faseT = 0; bochtK = 0; bochtD0 = 0; bochtS = 0; if (vork) { wereld.remove(vork); vork = null; } }
       break;
   }
   knijp = false;
@@ -1344,7 +1392,7 @@ function update(p, q, frame, ref, dt) {
   }
   wapperVlaggen(tijd); updateDecor(dt, v, tijd); updateSneeuw(dt, v, tijd);
   if (object && object.userData.publiek) for (const t of object.userData.publiek) zetToeschouwer(t, tijd, true);
-  if (!(opdr && opdr.id === 'splits' && opdr.klaar)) bochtS *= Math.exp(-dt / 1.2);
+  if (vork) { vork.userData.dDiv -= Math.max(v, 1) * dt; if (vork.userData.dDiv < -(VORK_L + 2)) { wereld.remove(vork); vork = null; } }
   if (object && object.isLineSegments) {   // windstrepen
     const arr = object.geometry.attributes.position.array;
     object.userData.p.forEach((s, i) => { s.z += (6 + v) * dt; if (s.z > 1) s.z = -12; arr.set([s.x, s.y, s.z, s.x, s.y, s.z - 0.5], i * 6); });
@@ -1354,6 +1402,7 @@ function update(p, q, frame, ref, dt) {
   poseerMaatje(tijd, doelPose, dt);
   maatje.position.x += bochtX(2.6); maatjeSchaduw.position.x = maatje.position.x;
   pasBochtToe();
+  if (actieveVork()) zetVork(actieveVork());
   if (object && object.userData.kraam) zetStempelaar(object);
   updateLijf(p, q, { left: handInfo.left && handInfo.left.pols, right: handInfo.right && handInfo.right.pols }, lat, dt);
   // het Elfstedenkruisje zweeft voor je bij de finish
@@ -1391,14 +1440,13 @@ function voorbeeld(t) {
     if (VB.has('derde')) { camera.position.set(1.1, 2.0, 2.0); camera.lookAt(0, 1.0, -1.5); }
     if (VB.has('geensneeuw')) sneeuw.visible = false;
     const o = VB.get('opdr');
-    if (o === 'splits') plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1));
-    else if (o === 'splitsbocht') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); bochtK = D.splitsK; bochtS = D.splitsOpzij; }
+    if (o === 'splits') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); object.userData.dDiv = +(VB.get('d') || 3); }
+    else if (o === 'splitsbocht') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); const u = object.userData; u.dDiv = +(VB.get('d') || 2); u.c = u.cg = 1; bochtK = D.splitsK; bochtD0 = Math.max(0, u.dDiv); }
     else if (o === 'kruisje') { kruisje.visible = true; kruisje.position.set(0, 1.5, -0.6); kruisje.scale.setScalar(1); }
     else if (o === 'bocht' || o === 'bocht-rechts') { const r = o === 'bocht' ? -1 : 1; plaatsObject(maakBochtBorden(r)); bochtK = r * D.bochtK; bochtD0 = 3; }
     else if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.58 : 0.66, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
     else if (o === 'wak') plaatsObject(maakWak()); else if (o === 'brug') plaatsObject(maakBrug(1.69)); else if (o === 'wind') plaatsObject(maakWind()); else if (o === 'finish') plaatsObject(maakFinish());
-    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? -4 : -5;
-    if (o === 'splitsbocht') bochtD0 = 4;
+    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? 0 : -5;
     if (o && o.startsWith('bocht')) zetBalk(0.6);
     const opd = o === 'stempel-links' ? OPDRACHTEN.find(x => x.stad === 'IJlst') : o === 'bocht-rechts' ? OPDRACHTEN.find(x => x.richting === 1) : OPDRACHTEN.find(x => x.id === o);
     zetWolk(o === 'splits' ? 'Welke kant? Stap!' : opd ? opd.aankondiging : o === 'finish' ? 'De finish komt eraan!' : 'Lekker tempo!');
@@ -1408,6 +1456,7 @@ function voorbeeld(t) {
   poseerMaatje(ts, { lean: o && o !== 'decor' ? 0 : Math.sin(ts * Math.PI * 2 / 1.8), buk: o === 'brug' ? 1 : 0, rug: o === 'wind' ? 1 : 0, juich: o === 'finish' ? 1 : 0, zij: o === 'wak' ? -0.35 : 0, reik: o === 'stempel' ? 1 : o === 'stempel-links' ? -1 : 0, draai: VB.has('draai') ? 1 : 0 }, dt);
   maatje.position.x += bochtX(2.6); maatjeSchaduw.position.x = maatje.position.x;
   if (object && object.userData.bocht) { object.userData.scroll += vv * dt; zetBochtBorden(object); }
+  if (object && object.userData.splits) zetVork(object);
   if (object && object.userData.publiek) for (const p of object.userData.publiek) zetToeschouwer(p, ts, true);
   if (o === 'kruisje') kruisje.rotation.y = Math.sin(ts * 1.3) * 0.5;
   wapperVlaggen(ts); updateDecor(dt, vv, ts); updateSneeuw(dt, vv, ts);
