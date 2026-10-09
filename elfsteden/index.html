@@ -651,6 +651,7 @@ function update(p, q, frame, ref, dt) {
         if (opdr.id === 'wak') doelPose.zij = (zObj > -4.2 && zObj < -1.2) ? -0.35 : 0;
         if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
         if (opdr.id === 'wind' && !opdr.klaar) doelPose.rug = 1;
+        if (opdr.id === 'splits') doelPose.zij = -0.5;   // maatje schuift opzij zodat de wegwijzer goed te zien is
         const gelukt = () => { opdr.klaar = true; opdr.gelukt = true; opdr.klaarT = ot; geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +(opdr.reactie ?? ot).toFixed(2), ...(opdr.detail || {}) }); };
         const mislukt = () => { opdr.klaar = true; opdr.klaarT = ot; geluid.mis(); zetWolk(opdr.mis); gebeurtenis('mislukt', { id: opdr.id, ...(opdr.detail || {}) }); };
         if (!opdr.klaar) {
@@ -768,7 +769,7 @@ function update(p, q, frame, ref, dt) {
             const na = ot - NADER;   // tijd sinds de punt van de splitsing bij je is
             const omhul = na < 0 ? 0 : na < 1.5 ? na / 1.5 : Math.max(0, 1 - (na - 1.5) / 2);
             bochtD0 = 0; bochtK = opdr.keuze * D.splitsK * 0.6 * omhul;
-            if (!opdr.gelukt && ot - opdr.klaarT > 2.5) zetWolk(`Onthoud: ${ROUTE.slice(ROUTE.indexOf(opdr.stad)).join(' – ')}`, '#F6F01D');
+            if (!opdr.gelukt && ot - opdr.klaarT > 2.5 && opdr.stad !== ROUTE[ROUTE.length - 1]) zetWolk(`Onthoud: ${ROUTE.slice(ROUTE.indexOf(opdr.stad)).join(' – ')}`, '#F6F01D');
             else if (opdr.gelukt && Math.abs(lat) > 0.12 && ot - opdr.klaarT > 2) zetWolk('Kom maar weer terug naar het midden');
             klaarVoorVolgende = ot > NADER + 4 && ot - opdr.klaarT > 4;
           }
