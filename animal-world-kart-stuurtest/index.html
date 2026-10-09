@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Animal World Kart – stuurtest</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{color-scheme:dark;--paars:#662a88;--blauw:#43bffd;--roze:#eb69bb;--geel:#f6f01d;--donker:#152139;--kaart:#202b45}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% 0,#314067 0,#12192a 58%,#090d17 100%);color:#fff;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:grid;place-items:center;padding:20px}
+  main{width:min(680px,100%);background:rgba(24,34,56,.94);border:2px solid rgba(67,191,253,.35);border-radius:28px;padding:clamp(22px,5vw,38px);box-shadow:0 24px 70px rgba(0,0,0,.42)}
+  h1{font-size:clamp(2rem,7vw,3.2rem);line-height:1;margin:0 0 8px}.accent{color:var(--blauw)}
+  h2{font-size:1.12rem;margin:24px 0 8px}p{line-height:1.52;color:#d9e4f5;margin:8px 0}.small{font-size:.9rem;color:#9fb0ca}
+  .veilig{background:#17243a;border-left:5px solid var(--geel);padding:12px 14px;border-radius:8px;margin:18px 0}
+  .keuzes{display:grid;grid-template-columns:1fr 1fr;gap:10px}.keuze{position:relative}.keuze input{position:absolute;opacity:0}.keuze label{display:block;padding:15px;border-radius:14px;background:#111a2c;border:2px solid #40506f;cursor:pointer;text-align:center;font-weight:700}.keuze input:checked+label{border-color:var(--blauw);background:#163451;box-shadow:0 0 0 2px rgba(67,191,253,.16)}
+  button{font:inherit;font-weight:800;border:0;border-radius:15px;padding:14px 18px;cursor:pointer}#start{width:100%;margin-top:20px;font-size:1.25rem;background:linear-gradient(135deg,var(--roze),var(--paars));color:white}#start:disabled{filter:grayscale(1);opacity:.55;cursor:not-allowed}
+  #status{min-height:1.5em;margin-top:13px;text-align:center;color:#ffd96a}.acties{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.acties button{background:#334464;color:white;flex:1}.acties button.primary{background:#176b91}
+  #resultaten{display:none;margin-top:24px;border-top:1px solid #43516b;padding-top:18px}table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{padding:8px 5px;border-bottom:1px solid #35425b;text-align:right}th:first-child,td:first-child{text-align:left}.winnaar{color:var(--geel);font-weight:800}
+  #xrCanvas{position:fixed;inset:0;width:100%;height:100%;z-index:10}.previewBadge{position:fixed;z-index:20;left:14px;top:14px;background:rgba(12,18,30,.82);padding:9px 13px;border-radius:10px;display:none}
+  @media(max-width:520px){.keuzes{grid-template-columns:1fr}main{border-radius:18px}}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<main id="startkaart">
+  <h1>Animal World <span class="accent">Kart</span></h1>
+  <p><strong>Technische stuurtest · versie <span id="versie"></span></strong></p>
+  <p>Vergelijk twee manieren om met de Quest-controllers een denkbeeldig stuur vast te houden. Na afloop zie je welke methode het nauwkeurigst werkte.</p>
+  <div class="veilig"><strong>Veilig zitten:</strong> gebruik een vaste stoel zonder wielen of draaifunctie. Houd rondom genoeg vrije ruimte en blijf tijdens de hele test zitten.</div>
+  <h2>Hoe wil je gas geven?</h2>
+  <div class="keuzes">
+    <div class="keuze"><input id="gasAuto" name="gas" type="radio" value="automatisch" checked><label for="gasAuto">Automatisch gas<br><span class="small">alleen sturen en remmen</span></label></div>
+    <div class="keuze"><input id="gasZelf" name="gas" type="radio" value="zelf"><label for="gasZelf">Zelf gas geven<br><span class="small">rechter trigger = gas</span></label></div>
+  </div>
+  <button id="start" disabled>WebXR controleren…</button>
+  <div id="status" role="status"></div>
+  <div id="resultaten">
+    <h2>Resultaten vorige test</h2>
+    <div id="samenvatting"></div>
+    <div class="acties"><button id="download" class="primary">Download meetgegevens (JSON)</button><button id="opnieuw">Opnieuw testen</button></div>
+  </div>
+  <p class="small">Er worden geen namen of beelden opgeslagen. Meetgegevens blijven op dit apparaat tot je ze zelf downloadt.</p>
+</main>
+<div id="previewBadge" class="previewBadge"></div>
+
+<script type="module">
+import * as THREE from 'three';
+
+const VERSIE = '0.1';
+const APP = 'Animal World Kart stuurtest';
+const PARAMS = new URLSearchParams(location.search);
+const VOORBEELD = PARAMS.has('voorbeeld');
+const SIMULATIE = PARAMS.has('simulatie');
+const STIL = PARAMS.has('stil');
+const DEG = Math.PI / 180;
+document.getElementById('versie').textContent = VERSIE;
+
+const ui = {
+  startkaart: document.getElementById('startkaart'), start: document.getElementById('start'), status: document.getElementById('status'),
+  resultaten: document.getElementById('resultaten'), samenvatting: document.getElementById('samenvatting'), download: document.getElementById('download'),
+  opnieuw: document.getElementById('opnieuw'), badge: document.getElementById('previewBadge')
+};
+
+const renderer = new THREE.WebGLRenderer({antialias:true,alpha:true,powerPreference:'high-performance'});
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.setSize(innerWidth,innerHeight);
+renderer.setClearColor(0x000000,0);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.domElement.id = 'xrCanvas';
+renderer.domElement.style.display = 'none';
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(68,innerWidth/innerHeight,.02,120);
+scene.add(new THREE.HemisphereLight(0xcceeff,0x182039,2.1));
+const zon = new THREE.DirectionalLight(0xffffff,1.9); zon.position.set(-2,5,2); scene.add(zon);
+
+const wereld = new THREE.Group(); scene.add(wereld);
+const baanGroep = new THREE.Group(); wereld.add(baanGroep);
+const cockpit = new THREE.Group(); wereld.add(cockpit);
+const hudGroep = new THREE.Group(); wereld.add(hudGroep);
+
+const MAT = {
+  donker:new THREE.MeshLambertMaterial({color:0x202842}), paars:new THREE.MeshLambertMaterial({color:0x662a88}), blauw:new THREE.MeshLambertMaterial({color:0x43bffd}),
+  roze:new THREE.MeshLambertMaterial({color:0xeb69bb}), geel:new THREE.MeshLambertMaterial({color:0xf6f01d}), wit:new THREE.MeshLambertMaterial({color:0xf2f6ff}),
+  weg:new THREE.MeshLambertMaterial({color:0x303747}), rand:new THREE.MeshLambertMaterial({color:0x7f91ad}), gras:new THREE.MeshLambertMaterial({color:0x3e9c70}),
+  ghost:new THREE.MeshBasicMaterial({color:0x43bffd,transparent:true,opacity:.24,depthWrite:false})
+};
+
+function afgerondeDoos(w,h,d,r,kleur){
+  const s=new THREE.Shape(); s.moveTo(-w/2+r,-h/2); s.lineTo(w/2-r,-h/2); s.quadraticCurveTo(w/2,-h/2,w/2,-h/2+r); s.lineTo(w/2,h/2-r); s.quadraticCurveTo(w/2,h/2,w/2-r,h/2); s.lineTo(-w/2+r,h/2); s.quadraticCurveTo(-w/2,h/2,-w/2,h/2-r); s.lineTo(-w/2,-h/2+r); s.quadraticCurveTo(-w/2,-h/2,-w/2+r,-h/2);
+  return new THREE.Mesh(new THREE.ExtrudeGeometry(s,{depth:d,bevelEnabled:true,bevelSize:r*.25,bevelThickness:r*.2,bevelSegments:2}),kleur);
+}
+
+// Cockpit en virtueel stuur
+const neus=afgerondeDoos(1.35,.38,.55,.16,MAT.paars); neus.rotation.x=-Math.PI/2; neus.position.set(0,.63,-.45); cockpit.add(neus);
+const dashboard=afgerondeDoos(.92,.22,.12,.08,MAT.donker); dashboard.position.set(0,1.02,-.68); cockpit.add(dashboard);
+const stuur=new THREE.Group(); stuur.position.set(0,1.13,-.52); stuur.rotation.x=-.14; cockpit.add(stuur);
+const stuurRing=new THREE.Mesh(new THREE.TorusGeometry(.255,.027,10,48),MAT.geel); stuur.add(stuurRing);
+const naaf=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.045,20),MAT.paars); naaf.rotation.x=Math.PI/2; stuur.add(naaf);
+for(const a of [0,Math.PI*2/3,Math.PI*4/3]){const spaak=new THREE.Mesh(new THREE.BoxGeometry(.19,.025,.025),MAT.geel);spaak.position.set(Math.cos(a)*.095,Math.sin(a)*.095,0);spaak.rotation.z=a;stuur.add(spaak)}
+const handenL=new THREE.Mesh(new THREE.SphereGeometry(.045,14,10),MAT.roze); const handenR=handenL.clone(); wereld.add(handenL,handenR);
+
+// Eindeloze eenvoudige testweg
+const grond=new THREE.Mesh(new THREE.PlaneGeometry(18,120),MAT.gras); grond.rotation.x=-Math.PI/2; grond.position.set(0,-.01,-45); baanGroep.add(grond);
+const weg=new THREE.Mesh(new THREE.PlaneGeometry(4.8,120),MAT.weg); weg.rotation.x=-Math.PI/2; weg.position.set(0,0,-45); baanGroep.add(weg);
+for(const x of [-2.4,2.4]){const lijn=new THREE.Mesh(new THREE.BoxGeometry(.09,.025,120),MAT.rand);lijn.position.set(x,.015,-45);baanGroep.add(lijn)}
+const strepen=[]; for(let i=0;i<18;i++){const m=new THREE.Mesh(new THREE.BoxGeometry(.06,.025,2.1),MAT.wit);m.position.set(0,.018,-i*6);baanGroep.add(m);strepen.push(m)}
+for(let i=0;i<22;i++){const x=(i%2?1:-1)*(3.1+(i%3)*.35);const p=new THREE.Mesh(new THREE.CylinderGeometry(.05,.08,.8,8),i%2?MAT.blauw:MAT.roze);p.position.set(x,.4,-i*5);baanGroep.add(p)}
+
+const gates=[];
+function maakPoort(i){
+  const g=new THREE.Group(), kleur=i%2?MAT.roze:MAT.blauw;
+  for(const x of [-.8,.8]){const p=new THREE.Mesh(new THREE.CylinderGeometry(.045,.065,1.15,10),kleur);p.position.set(x,.575,0);g.add(p)}
+  const b=new THREE.Mesh(new THREE.BoxGeometry(1.65,.1,.1),kleur);b.position.y=1.13;g.add(b);g.userData={index:i,passed:false,x:0};g.visible=false;baanGroep.add(g);gates.push(g);return g;
+}
+for(let i=0;i<10;i++)maakPoort(i);
+
+const kartMarker=new THREE.Mesh(new THREE.ConeGeometry(.13,.35,4),MAT.geel); kartMarker.rotation.x=Math.PI/2; kartMarker.position.set(0,.035,-2.2); baanGroep.add(kartMarker);
+const doelWijzer=new THREE.Mesh(new THREE.TorusGeometry(.32,.035,10,40),MAT.geel); doelWijzer.position.set(0,1.55,-2.4); wereld.add(doelWijzer); doelWijzer.visible=false;
+
+// Canvas-HUD
+const hudCanvas=document.createElement('canvas');hudCanvas.width=1200;hudCanvas.height=650;const hctx=hudCanvas.getContext('2d');
+const hudTex=new THREE.CanvasTexture(hudCanvas);hudTex.colorSpace=THREE.SRGBColorSpace;
+const hud=new THREE.Mesh(new THREE.PlaneGeometry(1.08,.585),new THREE.MeshBasicMaterial({map:hudTex,transparent:true,depthWrite:false}));hud.position.set(0,1.75,-2.05);hudGroep.add(hud);
+let laatsteHud='';
+function wrapTekst(ctx,tekst,x,y,max,regel){const woorden=tekst.split(' ');let zin='';const regels=[];for(const w of woorden){const test=zin?zin+' '+w:w;if(ctx.measureText(test).width>max&&zin){regels.push(zin);zin=w}else zin=test}if(zin)regels.push(zin);regels.forEach((r,i)=>ctx.fillText(r,x,y+i*regel));return regels.length}
+function tekenHud(titel,tekst,detail='',kleur='#43BFFD'){
+  const sleutel=[titel,tekst,detail,kleur].join('|');if(sleutel===laatsteHud)return;laatsteHud=sleutel;hctx.clearRect(0,0,1200,650);hctx.fillStyle='rgba(17,25,43,.90)';hctx.beginPath();hctx.roundRect(12,12,1176,626,48);hctx.fill();hctx.lineWidth=8;hctx.strokeStyle=kleur;hctx.stroke();hctx.textAlign='center';hctx.fillStyle=kleur;hctx.font='800 72px system-ui';hctx.fillText(titel,600,110);hctx.fillStyle='#fff';hctx.font='700 49px system-ui';wrapTekst(hctx,tekst,600,205,1030,62);hctx.fillStyle='#b9c8dc';hctx.font='38px system-ui';wrapTekst(hctx,detail,600,505,1030,48);hudTex.needsUpdate=true;
+}
+
+let audio=null;
+function toon(freq=660,duur=.1){if(STIL||!audio)return;const o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;o.frequency.value=freq;g.gain.setValueAtTime(.12,t);g.gain.exponentialRampToValueAtTime(.001,t+duur);o.connect(g).connect(audio.destination);o.start(t);o.stop(t+duur)}
+
+const state={
+  fase:'wachten',subfase:'',methode:null,methodeVolgorde:['A','B'],methodeIndex:0,run:0,tijd:0,faseTijd:0,gasmodus:'automatisch',
+  stuurRuw:0,stuurGefilterd:0,doelHoek:0,kartX:0,snelheid:0,tracking:false,vorigeKnoppen:{},keuze:null,
+  kalibratie:{neutralA:0,neutralRollL:0,neutralRollR:0,maxA:45*DEG,maxB:45*DEG,afstand:0,links:0,rechts:0},
+  neutralSom:{a:0,l:0,r:0,afstand:0,n:0},range:{minA:0,maxA:0,minB:0,maxB:0},samples:[],events:[],resultaten:{},target:{lijst:[],index:0,start:0,hold:0,errors:[],overshoot:0,reaction:null},
+  slalom:{start:0,missed:0,hit:0,errors:[],corrections:0,lastSign:0},validFrames:0,totalFrames:0,laatsteLog:-1,sessionId:crypto.randomUUID?.()||Math.random().toString(36).slice(2)
+};
+let base={pos:new THREE.Vector3(),yaw:0,voor:new THREE.Vector3(0,0,-1),rechts:new THREE.Vector3(1,0,0),headY:1.55};
+let laatsteT=null,currentSession=null,selectPulse=false;
+
+function event(type,extra={}){state.events.push({t:+state.tijd.toFixed(3),type,...extra})}
+function zetFase(fase,subfase=''){state.fase=fase;state.subfase=subfase;state.faseTijd=0;laatsteHud='';event('fase',{fase,subfase})}
+function angleWrap(a){while(a>Math.PI)a-=Math.PI*2;while(a< -Math.PI)a+=Math.PI*2;return a}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function deadzoneAngle(a){const d=2*DEG;if(Math.abs(a)<=d)return 0;return Math.sign(a)*(Math.abs(a)-d)/(1-d/(state.methode==='A'?state.kalibratie.maxA:state.kalibratie.maxB))}
+
+function leesControllers(frame,ref){
+  const uit={valid:false,left:null,right:null,buttons:{},leftTrigger:0,rightTrigger:0};
+  if(!frame||!ref)return uit;
+  for(const bron of frame.session.inputSources){
+    if(!bron.gripSpace||!['left','right'].includes(bron.handedness))continue;
+    const p=frame.getPose(bron.gripSpace,ref);if(!p||p.emulatedPosition)continue;
+    const t=p.transform.position,o=p.transform.orientation;
+    const c={pos:new THREE.Vector3(t.x,t.y,t.z),quat:new THREE.Quaternion(o.x,o.y,o.z,o.w),source:bron};
+    uit[bron.handedness]=c;
+    const gp=bron.gamepad;
+    if(gp){const b=i=>!!gp.buttons[i]?.pressed;uit.buttons[bron.handedness+'Trigger']=b(0);uit.buttons[bron.handedness+'Primary']=b(4);uit.buttons[bron.handedness+'Secondary']=b(5);if(bron.handedness==='left')uit.leftTrigger=gp.buttons[0]?.value||0;else uit.rightTrigger=gp.buttons[0]?.value||0}
+  }
+  uit.valid=!!(uit.left&&uit.right);return uit;
+}
+
+function lokalePos(p){const d=p.clone().sub(base.pos);return new THREE.Vector3(d.dot(base.rechts),p.y,d.dot(base.voor))}
+function rollVanQuat(q){const up=new THREE.Vector3(0,1,0).applyQuaternion(q);return Math.atan2(up.dot(base.rechts),up.y)}
+function meetInput(inp){
+  if(inp.override)return {valid:inp.valid!==false,a:inp.positionAngle||0,rollL:inp.tiltAngle||0,rollR:inp.tiltAngle||0,afstand:.38,leftTrigger:inp.leftTrigger||0,rightTrigger:inp.rightTrigger||0,buttons:inp.buttons||{},lp:new THREE.Vector3(-.19,1.2,-.5),rp:new THREE.Vector3(.19,1.2,-.5)};
+  if(!inp.valid)return {valid:false,a:0,rollL:0,rollR:0,afstand:0,leftTrigger:0,rightTrigger:0,buttons:inp.buttons||{}};
+  const lp=lokalePos(inp.left.pos),rp=lokalePos(inp.right.pos);const dx=rp.x-lp.x,dy=lp.y-rp.y;
+  return {valid:true,a:Math.atan2(dy,Math.max(.001,dx)),rollL:rollVanQuat(inp.left.quat),rollR:rollVanQuat(inp.right.quat),afstand:inp.left.pos.distanceTo(inp.right.pos),leftTrigger:inp.leftTrigger,rightTrigger:inp.rightTrigger,buttons:inp.buttons,lp,rp};
+}
+function knopNet(naam,buttons){const nu=!!buttons[naam],vorig=!!state.vorigeKnoppen[naam];state.vorigeKnoppen[naam]=nu;return nu&&!vorig}
+function methodeHoek(m){
+  if(state.methode==='A')return angleWrap(m.a-state.kalibratie.neutralA);
+  const l=angleWrap(m.rollL-state.kalibratie.neutralRollL),r=angleWrap(m.rollR-state.kalibratie.neutralRollR);return (l+r)/2;
+}
+function stuurUpdate(m,dt){
+  const raw=methodeHoek(m),max=state.methode==='A'?state.kalibratie.maxA:state.kalibratie.maxB;
+  let norm=clamp(raw/max,-1,1);if(Math.abs(raw)<2*DEG)norm=0;else norm=Math.sign(norm)*Math.pow(Math.abs(norm),1.12);
+  state.stuurRuw=norm;const alpha=1-Math.exp(-dt/.08);state.stuurGefilterd+= (norm-state.stuurGefilterd)*alpha;stuur.rotation.z=-state.stuurGefilterd*max;
+  return raw;
+}
+function plaatsHanden(m){if(!m.valid||!m.lp){handenL.visible=handenR.visible=false;return}handenL.visible=handenR.visible=true;handenL.position.copy(m.lp);handenR.position.copy(m.rp)}
+
+function beginKalibratie(){
+  state.methode=null;state.neutralSom={a:0,l:0,r:0,afstand:0,n:0};state.range={minA:0,maxA:0,minB:0,maxB:0};state.stuurGefilterd=0;zetFase('kalibratie','neutraal');toon(620);
+}
+function voltooiNeutraal(){const n=Math.max(1,state.neutralSom.n);state.kalibratie.neutralA=state.neutralSom.a/n;state.kalibratie.neutralRollL=state.neutralSom.l/n;state.kalibratie.neutralRollR=state.neutralSom.r/n;state.kalibratie.afstand=state.neutralSom.afstand/n;zetFase('kalibratie','bereik');toon(740)}
+function voltooiBereik(){
+  const kies=(min,max)=>clamp(Math.max(Math.abs(min),Math.abs(max)),30*DEG,60*DEG);
+  state.kalibratie.maxA=kies(state.range.minA,state.range.maxA);state.kalibratie.maxB=kies(state.range.minB,state.range.maxB);
+  state.kalibratie.links=Math.min(state.range.minA,state.range.minB);state.kalibratie.rechts=Math.max(state.range.maxA,state.range.maxB);
+  event('kalibratie-klaar',{afstand:+state.kalibratie.afstand.toFixed(3),maxA:+(state.kalibratie.maxA/DEG).toFixed(1),maxB:+(state.kalibratie.maxB/DEG).toFixed(1)});
+  state.methodeIndex=0;state.methode=state.methodeVolgorde[0];zetFase('methodeIntro');toon(880);
+}
+function beginStil(){state.validFrames=state.totalFrames=0;state.resultaten[state.methode]={still:[],targets:[],slalom:null};zetFase('stil');}
+function beginTargets(){state.target={lijst:[-30,-15,0,15,30,30,15,0,-15,-30],index:0,start:state.tijd,hold:0,errors:[],overshoot:0,reaction:null};state.doelHoek=state.target.lijst[0]*DEG;doelWijzer.visible=true;zetFase('targets');}
+function volgendeTarget(){
+  const T=state.target,doel=T.lijst[T.index]*DEG,mean=T.errors.length?T.errors.reduce((a,b)=>a+b,0)/T.errors.length:Math.PI;
+  state.resultaten[state.methode].targets.push({doelGraden:T.lijst[T.index],reactietijd:T.reaction===null?null:+T.reaction.toFixed(3),gemiddeldeFoutGraden:+(mean/DEG).toFixed(2),overshootGraden:+(T.overshoot/DEG).toFixed(2)});
+  T.index++;if(T.index>=T.lijst.length){doelWijzer.visible=false;beginSlalom();return}T.start=state.tijd;T.hold=0;T.errors=[];T.overshoot=0;T.reaction=null;state.doelHoek=T.lijst[T.index]*DEG;toon(620);
+}
+function beginSlalom(){state.slalom={start:state.tijd,missed:0,hit:0,errors:[],corrections:0,lastSign:0};state.kartX=0;gates.forEach((g,i)=>{g.position.set((i%4<2?-1:1)*1.15,0,-12-i*20);g.userData.x=g.position.x;g.userData.passed=false;g.visible=true});zetFase('slalom');toon(880)}
+function voltooiMethode(){
+  const R=state.resultaten[state.methode],still=R.still,targets=R.targets,S=R.slalom;
+  R.summary={
+    stabiliteitGraden: +(Math.sqrt(still.reduce((a,v)=>a+v*v,0)/Math.max(1,still.length))/DEG).toFixed(2),
+    gemiddeldeFoutGraden:+(targets.reduce((a,v)=>a+v.gemiddeldeFoutGraden,0)/targets.length).toFixed(2),
+    reactietijd:+(targets.reduce((a,v)=>a+(v.reactietijd===null?5:v.reactietijd),0)/targets.length).toFixed(2),
+    overshootGraden:+(targets.reduce((a,v)=>a+v.overshootGraden,0)/targets.length).toFixed(2),gemistePoorten:S.missed,
+    trackingPct:+(100*state.validFrames/Math.max(1,state.totalFrames)).toFixed(1),gemiddeldeSlalomAfwijking:+(S.errors.reduce((a,v)=>a+v,0)/Math.max(1,S.errors.length)).toFixed(2)
+  };
+  event('methode-klaar',{methode:state.methode,...R.summary});state.methodeIndex++;
+  if(state.methodeIndex<2){state.methode=state.methodeVolgorde[state.methodeIndex];zetFase('methodeIntro');toon(880)}else beginVrij();
+}
+function beginVrij(){state.methode=technischBeste();state.kartX=0;zetFase('vrij');toon(1040)}
+function technischBeste(){
+  if(!state.resultaten.A?.summary||!state.resultaten.B?.summary)return 'A';
+  const score=m=>{const s=state.resultaten[m].summary;return s.stabiliteitGraden+s.gemiddeldeFoutGraden+s.overshootGraden+s.gemistePoorten*2+(100-s.trackingPct)*.1};return score('A')<=score('B')?'A':'B';
+}
+function naarResultaat(){state.methode=null;state.snelheid=0;gates.forEach(g=>g.visible=false);zetFase('resultaat');toon(1320,.18)}
+
+function updateLog(m,raw){
+  if(['resultaat','wachten'].includes(state.fase))return;
+  if(state.tijd-state.laatsteLog<.033)return;state.laatsteLog=state.tijd;
+  if(state.samples.length<60000)state.samples.push([+state.tijd.toFixed(3),state.fase,state.methode||'',+raw.toFixed(4),+state.stuurGefilterd.toFixed(4),+state.doelHoek.toFixed(4),m.valid?1:0,+state.kartX.toFixed(3),+m.leftTrigger.toFixed(2),+m.rightTrigger.toFixed(2)]);
+}
+
+function updateSpel(dt,input){
+  state.tijd+=dt;state.faseTijd+=dt;const m=meetInput(input);state.tracking=m.valid;state.totalFrames++;if(m.valid)state.validFrames++;
+  plaatsHanden(m);const confirm=knopNet('rightPrimary',m.buttons);selectPulse=false;const recal=knopNet('leftPrimary',m.buttons);
+  let raw=0;
+  if(state.methode&&m.valid)raw=stuurUpdate(m,dt);else if(!state.methode){state.stuurRuw=0;state.stuurGefilterd*=Math.exp(-dt/.08);stuur.rotation.z*=Math.exp(-dt/.08)}
+  updateLog(m,raw);
+  if(['stil','targets','slalom','vrij'].includes(state.fase)&&!m.valid){
+    state.faseTijd=Math.max(0,state.faseTijd-dt);if(state.fase==='targets')state.target.start+=dt;
+    state.stuurRuw=0;state.stuurGefilterd=0;state.snelheid=0;stuur.rotation.z=0;
+    tekenHud('Test gepauzeerd','Houd beide controllers weer voor je','De test gaat automatisch verder zodra beide controllers zichtbaar zijn','#F6F01D');
+    return;
+  }
+
+  if(state.fase==='controllers'){
+    tekenHud('Controllers zoeken',m.valid?'Beide controllers gevonden':'Houd beide controllers voor je vast',m.valid?`Afstand ${(m.afstand*100).toFixed(0)} cm · blijf recht vooruit kijken`:'Gebruik de linker- en rechter Quest-controller');
+    if(m.valid&&m.afstand>=.2&&m.afstand<=.6){state.subfase=state.subfase||state.tijd;if(state.tijd-state.subfase>1)beginKalibratie()}else state.subfase='';
+  }else if(state.fase==='kalibratie'&&state.subfase==='neutraal'){
+    tekenHud('Stuur recht','Houd je handen één seconde rustig stil','Alsof je een echt stuur recht voor je vasthoudt');
+    if(!m.valid){zetFase('controllers');return}state.neutralSom.a+=m.a;state.neutralSom.l+=m.rollL;state.neutralSom.r+=m.rollR;state.neutralSom.afstand+=m.afstand;state.neutralSom.n++;if(state.faseTijd>=1)voltooiNeutraal();
+  }else if(state.fase==='kalibratie'&&state.subfase==='bereik'){
+    const a=angleWrap(m.a-state.kalibratie.neutralA),b=(angleWrap(m.rollL-state.kalibratie.neutralRollL)+angleWrap(m.rollR-state.kalibratie.neutralRollR))/2;state.range.minA=Math.min(state.range.minA,a);state.range.maxA=Math.max(state.range.maxA,a);state.range.minB=Math.min(state.range.minB,b);state.range.maxB=Math.max(state.range.maxB,b);
+    tekenHud('Meet je bereik','Draai rustig helemaal links en helemaal rechts',`Nog ${Math.max(0,6-state.faseTijd).toFixed(0)} seconden`);if(state.faseTijd>=6)voltooiBereik();
+  }else if(state.fase==='methodeIntro'){
+    const naam=state.methode==='A'?'A · Positiegestuurd':'B · Kantelgestuurd';tekenHud(naam,state.methode==='A'?'Draai de lijn tussen je handen als een stuur':'Kantel beide controllers mee met het stuur','Druk op A om deze test te starten');if(confirm||SIMULATIE)beginStil();
+  }else if(state.fase==='stil'){
+    tekenHud(`Methode ${state.methode}`,'Houd het stuur recht en zo stil mogelijk',`Nog ${Math.max(0,5-state.faseTijd).toFixed(1)} seconden`);if(m.valid)state.resultaten[state.methode].still.push(raw);if(state.faseTijd>=5)beginTargets();
+  }else if(state.fase==='targets'){
+    const T=state.target,err=Math.abs(raw-state.doelHoek);T.errors.push(err);if(T.reaction===null&&err<=5*DEG)T.reaction=state.tijd-T.start;const richting=Math.sign(state.doelHoek)||1;T.overshoot=Math.max(T.overshoot,Math.max(0,(raw-state.doelHoek)*richting));T.hold=err<=5*DEG?T.hold+dt:0;doelWijzer.rotation.z=-state.doelHoek;
+    tekenHud('Volg de gele ring',`${T.lijst[T.index]>0?'Draai rechts':T.lijst[T.index]<0?'Draai links':'Zet het stuur recht'} naar ${Math.abs(T.lijst[T.index])}°`,`Doel ${T.index+1} van ${T.lijst.length} · houd 0,5 seconde vast`);if(T.hold>=.5||state.tijd-T.start>=5)volgendeTarget();
+  }else if(state.fase==='slalom'){
+    const S=state.slalom;state.snelheid=5;state.kartX=clamp(state.kartX+state.stuurGefilterd*1.45*dt,-2,2);const sign=Math.sign(state.stuurGefilterd);if(sign&&sign!==S.lastSign){if(S.lastSign)S.corrections++;S.lastSign=sign}let next=null;
+    for(const g of gates){g.position.z+=state.snelheid*dt;if(!g.userData.passed&&g.position.z<0)next=next||g;if(!g.userData.passed&&g.position.z>=-.55){g.userData.passed=true;const fout=Math.abs(state.kartX-g.userData.x);S.errors.push(fout);if(fout<=.78){S.hit++;toon(920)}else{S.missed++;toon(230)}g.visible=false}}
+    kartMarker.position.x=state.kartX;baanGroep.position.x=-state.kartX;tekenHud(`Slalom · methode ${state.methode}`,'Stuur door de gekleurde poortjes',`${S.hit} goed · ${S.missed} gemist · nog ${Math.max(0,45-state.faseTijd).toFixed(0)} s`);
+    if(state.faseTijd>=45){state.resultaten[state.methode].slalom={hit:S.hit,missed:S.missed,errors:S.errors,corrections:S.corrections};voltooiMethode()}
+  }else if(state.fase==='vrij'){
+    const gas=state.gasmodus==='automatisch'?1:m.rightTrigger,rem=m.leftTrigger;state.snelheid=clamp(state.snelheid+(gas*3.4-rem*6-1.1)*dt,0,7);state.kartX=clamp(state.kartX+state.stuurGefilterd*(.4+state.snelheid*.2)*dt,-2,2);kartMarker.position.x=state.kartX;baanGroep.position.x=-state.kartX;
+    tekenHud('Vrij rijden',state.gasmodus==='automatisch'?'Stuur en probeer de linker remtrigger':'Rechter trigger is gas · linker trigger is rem',`Methode ${state.methode} · snelheid ${(state.snelheid*3.6).toFixed(0)} km/u · nog ${Math.max(0,30-state.faseTijd).toFixed(0)} s`);if(recal&&state.snelheid<.2)beginKalibratie();if(state.faseTijd>=30)naarResultaat();
+  }else if(state.fase==='resultaat'){
+    const best=technischBeste();const gekozen=state.keuze?`Jouw keuze: ${state.keuze==='gelijk'?'geen verschil':'methode '+state.keuze}`:'A = methode A · B = methode B · X = geen verschil';tekenHud('Test voltooid',`Technisch resultaat: methode ${best}`,state.keuze?`${gekozen} · druk A om af te sluiten`:`Welke voelde natuurlijker? ${gekozen}`,'#F6F01D');
+    if(!state.keuze){if(knopNet('rightPrimaryChoice',m.buttons)||confirm)state.keuze='A';else if(knopNet('rightSecondary',m.buttons))state.keuze='B';else if(knopNet('leftPrimaryChoice',m.buttons)||recal)state.keuze='gelijk';if(state.keuze){event('voorkeur',{keuze:state.keuze});toon(1040)}}else if(confirm&&currentSession)currentSession.end();
+  }
+  beweegWeg(dt);
+}
+
+function beweegWeg(dt){const speed=state.fase==='slalom'?5:state.fase==='vrij'?state.snelheid:1.2;for(const s of strepen){s.position.z+=speed*dt;if(s.position.z>3)s.position.z-=108}}
+
+function plaatsWereld(p,q){
+  const f=new THREE.Vector3(0,0,-1).applyQuaternion(q);f.y=0;if(f.lengthSq()<.001)f.set(0,0,-1);f.normalize();const yaw=Math.atan2(-f.x,-f.z);base={pos:new THREE.Vector3(p.x,p.y,p.z),yaw,voor:f,rechts:new THREE.Vector3(-f.z,0,f.x),headY:p.y};wereld.position.set(p.x,0,p.z);wereld.rotation.y=yaw;cockpit.position.y=Math.max(0,p.y-1.55);hudGroep.position.y=Math.max(0,p.y-1.55);wereld.updateMatrixWorld(true);
+}
+
+function resetTest(){
+  state.run++;state.fase='controllers';state.subfase='';state.methodeVolgorde=state.run%2===1?['A','B']:['B','A'];state.methode=null;state.methodeIndex=0;state.tijd=state.faseTijd=0;state.stuurRuw=state.stuurGefilterd=state.kartX=state.snelheid=0;state.samples=[];state.events=[];state.resultaten={};state.keuze=null;state.vorigeKnoppen={};state.laatsteLog=-1;state.gasmodus=document.querySelector('input[name=gas]:checked').value;baanGroep.position.x=0;gates.forEach(g=>g.visible=false);event('start',{gasmodus:state.gasmodus,volgorde:state.methodeVolgorde.join('-')});
+}
+
+function resultaatData(){return {app:APP,versie:VERSIE,datum:new Date().toISOString(),sessionId:state.sessionId,userAgent:navigator.userAgent,instellingen:{gasmodus:state.gasmodus,methodeVolgorde:state.methodeVolgorde},kalibratie:{...state.kalibratie},resultaten:state.resultaten,technischBeste:technischBeste(),voorkeur:state.keuze,sampleVelden:['t','fase','methode','ruweHoekRad','gefilterdNorm','doelHoekRad','tracking','kartX','rem','gas'],samples:state.samples,gebeurtenissen:state.events};}
+function toonHtmlResultaat(){
+  if(!state.resultaten.A?.summary||!state.resultaten.B?.summary)return;const a=state.resultaten.A.summary,b=state.resultaten.B.summary,best=technischBeste();
+  ui.samenvatting.innerHTML=`<p class="winnaar">Technisch beste methode: ${best}</p><table><thead><tr><th>Meting</th><th>A</th><th>B</th></tr></thead><tbody><tr><td>Stabiliteit</td><td>${a.stabiliteitGraden}°</td><td>${b.stabiliteitGraden}°</td></tr><tr><td>Gem. fout</td><td>${a.gemiddeldeFoutGraden}°</td><td>${b.gemiddeldeFoutGraden}°</td></tr><tr><td>Reactietijd</td><td>${a.reactietijd}s</td><td>${b.reactietijd}s</td></tr><tr><td>Gemiste poorten</td><td>${a.gemistePoorten}</td><td>${b.gemistePoorten}</td></tr><tr><td>Tracking</td><td>${a.trackingPct}%</td><td>${b.trackingPct}%</td></tr></tbody></table><p>Voorkeur: ${state.keuze==='gelijk'?'geen verschil':state.keuze?'methode '+state.keuze:'niet gekozen'}</p>`;ui.resultaten.style.display='block';
+}
+function downloadJson(){const blob=new Blob([JSON.stringify(resultaatData(),null,2)],{type:'application/json'}),a=document.createElement('a'),d=new Date(),pad=n=>String(n).padStart(2,'0');a.href=URL.createObjectURL(blob);a.download=`animal-world-kart-stuurtest-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+
+async function startXR(){
+  try{
+    if(!audio&&!STIL)audio=new AudioContext();resetTest();const sessie=await navigator.xr.requestSession('immersive-ar',{requiredFeatures:['local-floor']});currentSession=sessie;
+    sessie.addEventListener('select',()=>{selectPulse=true});sessie.addEventListener('end',()=>{currentSession=null;renderer.domElement.style.display='none';ui.startkaart.style.display='block';ui.start.textContent='Opnieuw starten';ui.status.textContent='Test afgerond.';toonHtmlResultaat();laatsteT=null});
+    await renderer.xr.setSession(sessie);renderer.domElement.style.display='block';ui.startkaart.style.display='none';state.fase='controllers';
+  }catch(e){ui.status.textContent='Starten mislukt: '+e.message}
+}
+
+ui.start.addEventListener('click',startXR);ui.download.addEventListener('click',downloadJson);ui.opnieuw.addEventListener('click',()=>{ui.resultaten.style.display='none';startXR()});
+
+function setupDesktop(){
+  renderer.setClearColor(0x91cdec,1);renderer.domElement.style.display='block';ui.startkaart.style.display='none';ui.badge.style.display='block';camera.position.set(0,1.55,.55);camera.lookAt(0,1.28,-2.5);plaatsWereld(new THREE.Vector3(0,1.55,0),new THREE.Quaternion());
+  resetTest();state.kalibratie={neutralA:0,neutralRollL:0,neutralRollR:0,maxA:45*DEG,maxB:45*DEG,afstand:.38,links:-45*DEG,rechts:45*DEG};state.fase=SIMULATIE?'controllers':'vrij';state.methode=SIMULATIE?null:state.methodeVolgorde[0];state.gasmodus='automatisch';
+  ui.badge.textContent=SIMULATIE?'Automatische simulatie':'Voorbeeld · pijltjestoetsen sturen';
+}
+const keys={};addEventListener('keydown',e=>keys[e.key]=true);addEventListener('keyup',e=>keys[e.key]=false);
+function desktopInput(){
+  if(SIMULATIE){let hoek=0;if(state.fase==='kalibratie'&&state.subfase==='bereik')hoek=Math.sin(state.tijd*2)*48*DEG;else if(state.fase==='targets')hoek=state.doelHoek;else if(state.fase==='slalom'){const next=gates.find(g=>g.visible&&!g.userData.passed);hoek=clamp(((next?.userData.x||0)-state.kartX)*.55,-1,1)*45*DEG}return {override:true,valid:true,positionAngle:hoek,tiltAngle:hoek,rightTrigger:.8,leftTrigger:0,buttons:{rightPrimary:state.fase==='methodeIntro'}}}
+  const hoek=((keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0))*38*DEG;return {override:true,valid:true,positionAngle:hoek,tiltAngle:hoek,rightTrigger:keys.ArrowUp?1:.6,leftTrigger:keys.ArrowDown?1:0,buttons:{}};
+}
+
+renderer.setAnimationLoop((t,frame)=>{
+  let dt=laatsteT===null?0:Math.min((t-laatsteT)/1000,.1);laatsteT=t;
+  if(frame){const ref=renderer.xr.getReferenceSpace(),pose=frame.getViewerPose(ref);if(pose){const tr=pose.transform,p=new THREE.Vector3(tr.position.x,tr.position.y,tr.position.z),q=new THREE.Quaternion(tr.orientation.x,tr.orientation.y,tr.orientation.z,tr.orientation.w);if(state.tijd===0)plaatsWereld(p,q);updateSpel(dt,leesControllers(frame,ref))}}
+  else if(VOORBEELD||SIMULATIE){if(SIMULATIE)dt*=10;updateSpel(dt,desktopInput());if(state.fase==='controllers')beginKalibratie();if(SIMULATIE&&state.fase==='resultaat'&&!state.keuze){state.keuze=technischBeste();ui.badge.textContent=`Simulatie voltooid · beste methode ${technischBeste()}`}}
+  renderer.render(scene,camera);
+});
+
+window.animalWorldKartTest={
+  get fase(){return state.fase},get methode(){return state.methode},get kalibratie(){return state.kalibratie},get stuurRuw(){return state.stuurRuw},get stuurGefilterd(){return state.stuurGefilterd},get resultaten(){return state.resultaten},
+  herkalibreer:beginKalibratie,startOnderdeel:()=>state.fase==='methodeIntro'&&beginStil(),updateMetTestposes:(poses,dt=.016)=>updateSpel(dt,{override:true,valid:true,...poses}),resultaatData
+};
+
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+
+if(VOORBEELD||SIMULATIE)setupDesktop();
+else if(!('xr'in navigator)){ui.start.textContent='Niet beschikbaar';ui.status.textContent='Open deze pagina in de browser van de Meta Quest.'}
+else navigator.xr.isSessionSupported('immersive-ar').then(ok=>{ui.start.disabled=!ok;ui.start.textContent=ok?'Start stuurtest':'Niet beschikbaar';if(!ok)ui.status.textContent='Mixed Reality wordt hier niet ondersteund. Open de pagina in de Meta Quest.'}).catch(()=>{ui.start.textContent='Niet beschikbaar';ui.status.textContent='De WebXR-controle is mislukt.'});
+</script>
+</body>
+</html>
