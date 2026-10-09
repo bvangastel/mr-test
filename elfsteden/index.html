@@ -32,7 +32,7 @@
 <body>
 <div class="kaart">
   <h1>iXbalance <span>MR</span> – proefrit</h1>
-  <p>Een korte schaatstocht over je eigen vloer, met je maatje voor je. Hij legt alles uit in tekstwolkjes en doet de bewegingen voor.</p>
+  <p>Een korte schaatstocht over je eigen vloer, met je maatje voor je. Hij legt alles uit in tekstwolkjes en doet de bewegingen voor. Voor je staat een scherm met het Friese landschap waar de ijsbaan uit komt; links en rechts zie je gewoon je kamer.</p>
   <div class="vak">
     <b>Zo werkt het</b>
     <ol>
@@ -51,12 +51,12 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.8</div>
+  <div id="versie">versie 0.9</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.8';
+const VERSIE = '0.9';
 
 // ---------- Instellingen ----------
 const D = {
@@ -116,7 +116,7 @@ renderer.xr.setReferenceSpaceType('local-floor');
 renderer.domElement.style.display = 'none';
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, 1, 0.01, 60);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.01, 80);
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 2.2));
 const zon = new THREE.DirectionalLight(0xffffff, 1.2); zon.position.set(1, 3, 2); scene.add(zon);
 
@@ -360,18 +360,64 @@ function zetDecor(obj, x, z, per, ry = 0) { obj.userData.d = { x, z, per, ry }; 
 zetDecor(maakPubliek(3, 0, 1), 2.15, -9, 55);
 zetDecor(maakPubliek(4, 4, -1), -2.15, -30, 55);
 zetDecor(maakKoekEnZopie(), -2.9, -48, 85, -Math.PI / 2 - 0.3);
-zetDecor(maakMolen(), 13, -34, 110, Math.PI / 2 + 0.5);
-zetDecor(maakBoerderij(), -13, -80, 120, -Math.PI / 2 - 0.4);
+zetDecor(maakMolen(), 7.5, -30, 110, Math.PI / 2 + 0.5).userData.achter = true;
+zetDecor(maakBoerderij(), -10, -45, 120, -Math.PI / 2 - 0.4).userData.achter = true;
 zetDecor(new THREE.Mesh(popGeo, vcMat), 2.4, -70, 95, Math.PI / 2 + 0.4);
-for (let i = 0; i < 6; i++) { const w = new THREE.Mesh(wilgGeo, vcMat); w.userData.schaal = 0.9 + (i % 3) * 0.12; zetDecor(w, (i % 2 ? 1 : -1) * (4.2 + (i % 3) * 0.8), -12 - i * 11, 66, i); }
+for (let i = 0; i < 6; i++) { const w = new THREE.Mesh(wilgGeo, vcMat); w.userData.schaal = 0.9 + (i % 3) * 0.12; zetDecor(w, (i % 2 ? 1 : -1) * (3.6 + (i % 3) * 0.9), -12 - i * 11, 66, i).userData.achter = true; }
+// ---------- Scherm vóór je: daarachter het Friese landschap, links en rechts blijft je kamer zichtbaar ----------
+// een onzichtbare muur met een gat erin schrijft alleen diepte: alles van de rit áchter de muur zie je dus alleen door het gat
+const SCHERM = { z: -4.5, b: 5.2, h: 3.0 };
+const veldTex = canvasTex(256, 256, (c, w, h) => {
+  c.fillStyle = '#e9f0f6'; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 40; i++) { c.strokeStyle = `rgba(150,175,200,${0.12 + Math.random() * 0.18})`; c.lineWidth = 2 + Math.random() * 4;
+    const y = Math.random() * h; c.beginPath(); c.moveTo(0, y); c.bezierCurveTo(w * 0.3, y - 10, w * 0.6, y + 12, w, y + (Math.random() - 0.5) * 8); c.stroke(); }
+}, true);
+veldTex.repeat.set(8, 4);
+const landschap = (() => {
+  const g = new THREE.Group();
+  const muurVorm = new THREE.Shape(); muurVorm.moveTo(-60, -2); muurVorm.lineTo(60, -2); muurVorm.lineTo(60, 40); muurVorm.lineTo(-60, 40); muurVorm.closePath();
+  const gat = new THREE.Path(); const b = SCHERM.b / 2, h = SCHERM.h;
+  gat.moveTo(-b, -1); gat.lineTo(-b, h); gat.lineTo(b, h); gat.lineTo(b, -1); gat.closePath(); muurVorm.holes.push(gat);
+  const muur = new THREE.Mesh(new THREE.ShapeGeometry(muurVorm), new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }));
+  muur.position.z = SCHERM.z; muur.renderOrder = -10; g.add(muur);
+  // houten lijst om het scherm, met sneeuw erop en een bord
+  const lijst = new THREE.Mesh(bouw([
+    [G.doos, '#6b4423', [-b - 0.07, h / 2, 0], [0, 0, 0], [0.14, h + 0.14, 0.14]], [G.doos, '#6b4423', [b + 0.07, h / 2, 0], [0, 0, 0], [0.14, h + 0.14, 0.14]],
+    [G.doos, '#6b4423', [0, h + 0.07, 0], [0, 0, 0], [2 * b + 0.28, 0.14, 0.14]], [G.doos, '#f4f8fc', [0, h + 0.17, 0], [0, 0, 0], [2 * b + 0.34, 0.07, 0.2]],
+    [G.bolLaag, '#f4f8fc', [-b - 0.07, 0.04, 0], [0, 0, 0], [0.3, 0.1, 0.25]], [G.bolLaag, '#f4f8fc', [b + 0.07, 0.04, 0], [0, 0, 0], [0.3, 0.1, 0.25]]
+  ]), vcMat);
+  lijst.position.z = SCHERM.z; g.add(lijst);
+  const bord = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 0.42), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, map: canvasTex(512, 98, (c, w, hh) => {
+    c.fillStyle = '#21468b'; c.beginPath(); c.roundRect(3, 3, w - 6, hh - 6, 14); c.fill(); c.strokeStyle = '#ffffff'; c.lineWidth = 5; c.stroke();
+    c.fillStyle = '#ffffff'; c.font = 'bold 56px Georgia, serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Elfstedentocht', w / 2, hh / 2 + 3); }) }));
+  bord.position.set(0, h + 0.45, SCHERM.z + 0.02); g.add(bord);
+  // besneeuwd land tot aan de horizon
+  const veld = new THREE.Mesh(new THREE.PlaneGeometry(120, 60).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ map: veldTex, emissive: 0x8899aa, emissiveIntensity: 0.3 }));
+  veld.position.set(0, -0.012, SCHERM.z - 30); g.add(veld);
+  // lucht met verre bomenrij, boerderijen en een kerktoren
+  const lucht = new THREE.Mesh(new THREE.PlaneGeometry(140, 35), new THREE.MeshBasicMaterial({ map: canvasTex(1024, 256, (c, w, hh) => {
+    const gr = c.createLinearGradient(0, 0, 0, hh); gr.addColorStop(0, '#8fb4dc'); gr.addColorStop(0.75, '#dfe8f1'); gr.addColorStop(1, '#eef2f6'); c.fillStyle = gr; c.fillRect(0, 0, w, hh);
+    const zon = c.createRadialGradient(700, 150, 4, 700, 150, 60); zon.addColorStop(0, 'rgba(255,240,200,0.95)'); zon.addColorStop(1, 'rgba(255,240,200,0)'); c.fillStyle = zon; c.fillRect(600, 60, 200, 200);
+    c.fillStyle = 'rgba(255,255,255,0.5)'; for (let i = 0; i < 9; i++) { c.beginPath(); c.ellipse(Math.random() * w, 30 + Math.random() * 90, 50 + Math.random() * 70, 8 + Math.random() * 8, 0, 0, Math.PI * 2); c.fill(); }
+    const y0 = hh - 10;
+    c.fillStyle = '#7d8c99'; for (let x = 0; x < w; x += 6) { const t = 6 + 10 * Math.abs(Math.sin(x * 0.05)) + 6 * Math.abs(Math.sin(x * 0.013)); c.fillRect(x, y0 - t, 7, t + 10); }
+    c.fillStyle = '#6a7884';
+    for (const [x, bw, bh] of [[140, 40, 14], [430, 55, 18], [820, 46, 15]]) { c.fillRect(x, y0 - bh, bw, bh + 10); c.beginPath(); c.moveTo(x - 6, y0 - bh); c.lineTo(x + bw / 2, y0 - bh - 16); c.lineTo(x + bw + 6, y0 - bh); c.fill(); }
+    c.fillRect(600, y0 - 40, 10, 50); c.beginPath(); c.moveTo(597, y0 - 40); c.lineTo(605, y0 - 64); c.lineTo(613, y0 - 40); c.fill();
+    c.fillStyle = '#eef2f6'; c.fillRect(0, y0, w, 10);
+  }) }));
+  lucht.position.set(0, 17.5 - 0.4, SCHERM.z - 55); g.add(lucht);
+  wereld.add(g); return g;
+})();
 let juichT = -9;   // publiek juicht even na een gelukte opdracht
 function updateDecor(dt, snelheid, t) {
   const juich = t - juichT < 2.5;
+  veldTex.offset.y += snelheid * dt / 15;
   for (const o of decor) {
     const d = o.userData.d;
     d.z += snelheid * dt; if (d.z > 6) d.z -= d.per;
     const ver = -d.z;
-    o.visible = ver < 34;
+    o.visible = ver < 34 && !(o.userData.achter && ver < -SCHERM.z + 1);   // huizen en bomen alleen achter het scherm
     if (!o.visible) continue;
     o.scale.setScalar(Math.min(1, (34 - ver) / 4) * (o.userData.schaal || 1));
     const tt = Math.max(0, ver - bochtD0);
