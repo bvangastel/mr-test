@@ -59,12 +59,12 @@
   <div id="status"></div>
   <div id="resultaten"></div>
   <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
-  <div id="versie">versie 0.14</div>
+  <div id="versie">versie 0.15</div>
 </div>
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.14';
+const VERSIE = '0.15';
 
 // ---------- Instellingen ----------
 const D = {
@@ -73,7 +73,7 @@ const D = {
   vMax: 5.5,             // maximale snelheid (m/s)
   remTijd: 3.0,          // snelheid halveert ongeveer in deze tijd
   stapZij: 0.20, stapTijd: 0.15,
-  wijsZij: 0.30, wijsOnder: 0.55, wijsTijd: 0.3,   // aanwijzen: hand 30 cm opzij van je hoofd, niet lager dan 55 cm onder je ogen, 0,3 s
+  wijsZij: 0.30, wijsOnder: 0.55, wijsTijd: 0.5,   // aanwijzen: hand 30 cm opzij van je hoofd, niet lager dan 55 cm onder je ogen, 0,5 s vasthouden
   knie: 0.10, knieTijd: 0.25,   // bukken t.o.v. je schaatshouding, opgeteld terwijl de brug over je heen gaat
   rugTijd: 1.5,
   zitten: 0.42,          // hoofd zo veel lager dan bij het opstellen (1 s) = zitten = pauze
@@ -164,6 +164,7 @@ let niveau = {}, reeks = {}, kal = null;   // kal: meting (leunL/leunR/reikL/rei
 const STANDAARD = { leun: 0.25, reik: 0.75 };
 function laadEtappe(nr) {
   E = ETAPPES[nr - 1]; OPDRACHTEN = E.opdrachten; ROUTE = E.route || []; NADER = E.nader || 7;
+  if (typeof herbouwPubliek === 'function') herbouwPubliek(nr);
   for (const k in E.max) { niveau[k] = niveau[k] === undefined ? E.start[k] : Math.max(0, Math.min(E.max[k], niveau[k])); reeks[k] = 0; }
 }
 const trede = (k) => NIVEAU[k].treden[niveau[k] ?? 0];
@@ -197,6 +198,12 @@ const zon = new THREE.DirectionalLight(0xffffff, 1.2); zon.position.set(1, 3, 2)
 // alles van de rit hangt in 'wereld' (lokaal: -Z = vooruit, +X = rechts, oorsprong = startplek)
 const wereld = new THREE.Group(); wereld.visible = false; scene.add(wereld);
 
+// lettergrootte verkleinen tot de tekst in maxB pixels past
+function pasLetter(c, tekst, maxB, groot, min = 24, stijl = 'bold', familie = 'system-ui, sans-serif') {
+  let f = groot; c.font = `${stijl} ${f}px ${familie}`;
+  while (c.measureText(tekst).width > maxB && f > min) { f -= 2; c.font = `${stijl} ${f}px ${familie}`; }
+  return f;
+}
 function canvasTex(w, h, teken, herhaal = false) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   teken(c.getContext('2d'), w, h);
@@ -336,16 +343,36 @@ const vlagTex = [
   })
 ];
 const vlagGeo = new THREE.PlaneGeometry(0.24, 0.16, 6, 1).translate(0.12, 0, 0);
-const palen = [];   // (heten nog 'palen': ze schuiven mee en buigen mee in de bocht)
-for (let i = 0; i < 10; i++) for (const kant of [-1, 1]) {
-  const p = new THREE.Group();
-  const tak = new THREE.Mesh(takGeos[(i * 2 + (kant > 0 ? 1 : 0)) % 3], vcMat); tak.rotation.y = Math.random() * 6; tak.scale.setScalar(0.85 + Math.random() * 0.3); p.add(tak);
-  if ((i + (kant > 0 ? 1 : 0)) % 3 === 0) {
+// rietpollen: dunne, iets overhangende stengels met pluimen
+function maakRietGeo(n, h, seed) {
+  const d = [], kl = ['#cdb57e', '#b89c5f', '#d9c690', '#a98c55', '#c2a86f'];
+  for (let i = 0; i < n; i++) {
+    const a = i * 2.399 + seed, r = 0.02 + ((i * 13 + seed * 7) % 10) * 0.012;
+    const x = Math.cos(a) * r, z = Math.sin(a) * r, hh = h * (0.55 + 0.45 * (((i * 7 + seed) % 10) / 10));
+    const lean = 0.05 + ((i * 3 + seed) % 6) * 0.035, mx = x + Math.cos(a) * lean * hh * 0.4, mz = z + Math.sin(a) * lean * hh * 0.4;
+    const tx = x + Math.cos(a) * lean * hh, tz = z + Math.sin(a) * lean * hh;
+    const k = kl[(i + seed) % kl.length];
+    d.push(staaf([x, 0, z], [mx, hh * 0.55, mz], 0.0065, 0.005, k, 3), staaf([mx, hh * 0.55, mz], [tx, hh, tz], 0.005, 0.0025, k, 3));
+    if (i % 3 === 0) d.push(staaf([tx, hh - 0.02, tz], [tx + Math.cos(a) * 0.04, hh + 0.12, tz + Math.sin(a) * 0.04], 0.018, 0.006, i % 2 ? '#8d7353' : '#7a6248', 5));
+    if (i % 4 === 1) d.push(staaf([x, hh * 0.25, z], [x + Math.cos(a + 0.6) * 0.18, hh * 0.42, z + Math.sin(a + 0.6) * 0.18], 0.012, 0.002, '#b8a26c', 3));   // blad
+  }
+  d.push([G.bolLaag, '#f4f8fc', [0, 0.02, 0], [0, 0, 0], [0.24, 0.06, 0.2]]);
+  return bouw(d);
+}
+const rietGeos = [maakRietGeo(26, 1.05, 1), maakRietGeo(20, 0.85, 3), maakRietGeo(32, 1.2, 5)];
+const palen = [];   // (heten nog 'palen': riet, af en toe een sparretje of een vlaggetje; ze schuiven mee en buigen mee in de bocht)
+const N_PAAL = 14;
+for (let i = 0; i < N_PAAL; i++) for (const kant of [-1, 1]) {
+  const p = new THREE.Group(), j = i + (kant > 0 ? 3 : 0);
+  const spar = j % 7 === 3;
+  const m = new THREE.Mesh(spar ? takGeos[j % 3] : rietGeos[j % 3], vcMat); m.rotation.y = (j * 2.1) % 6.28; m.scale.setScalar(0.85 + ((j * 37) % 10) * 0.04); p.add(m);
+  if (j % 4 === 0) {
     const stok = new THREE.Mesh(stokGeo, vcMat); stok.position.x = kant * 0.08; p.add(stok);
     const vlag = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[(i + kant + 2) % 2], side: THREE.DoubleSide }));
     vlag.position.set(kant * 0.08, 1.1, 0); p.add(vlag); p.userData.vlag = vlag; p.userData.vlagHoek = kant > 0 ? -0.35 : Math.PI + 0.35;
   }
-  p.position.set(kant * 1.2, 0, -i * 3 - 1.5); p.userData.x0 = kant * 1.2; wereld.add(p); palen.push(p);
+  const x0 = kant * (1.22 + ((j * 37) % 10) / 10 * 0.5);
+  p.position.set(x0, 0, -i * (30 / N_PAAL) - 1.2); p.userData.x0 = x0; wereld.add(p); palen.push(p);
 }
 function wapperVlaggen(t) {
   for (const p of palen) { const v = p.userData.vlag; if (v) v.rotation.y = p.userData.vlagHoek + 0.3 * Math.sin(t * 3.1 + p.position.z * 0.7); }
@@ -357,7 +384,7 @@ const HUID = ['#f0c8a6', '#e0b08a', '#c68e64', '#8d5a3b', '#f3d2b8'];
 const tsGeo = { jas: new THREE.CylinderGeometry(0.15, 0.21, 0.7, 10), been: new THREE.CapsuleGeometry(0.06, 0.5, 3, 8), arm: new THREE.CapsuleGeometry(0.05, 0.42, 3, 8),
   sjaal: new THREE.TorusGeometry(0.08, 0.035, 6, 14).rotateX(Math.PI / 2), rand: new THREE.TorusGeometry(0.11, 0.02, 5, 14).rotateX(Math.PI / 2) };
 // eenvoudige toeschouwer: lijf in één stuk, twee losse armen om mee te zwaaien en te juichen
-function maakToeschouwer(i, schaal = 1) {
+function maakToeschouwer(i, schaal = 1, metVlag = false) {
   const jas = JAS[i % JAS.length], muts = MUTS[(i * 5 + 1) % MUTS.length], huid = HUID[(i * 7 + 2) % HUID.length], sjaal = MUTS[(i + 2) % MUTS.length][0];
   const g = new THREE.Group();
   const lijf = new THREE.Mesh(bouw([
@@ -375,22 +402,28 @@ function maakToeschouwer(i, schaal = 1) {
     a.position.set(k * 0.2, 1.28, 0); g.add(a); return a;
   };
   g.userData = { armL: arm(-1), armR: arm(1), fase: i * 1.7, toeschouwer: true };
+  if (metVlag) {   // zwaaivlag in de rechterhand
+    const st = new THREE.Mesh(bouw([staaf([0, -0.48, 0], [0, -1.15, 0], 0.012, 0.01, '#7a5230', 5)]), vcMat); g.userData.armR.add(st);
+    const vl = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[i % 2], side: THREE.DoubleSide })); vl.scale.setScalar(1.5); vl.position.y = -1.08; g.userData.armR.add(vl);
+    g.userData.vlag = vl;
+  }
   g.scale.setScalar(schaal);
   return g;
 }
 function zetToeschouwer(f, t, juich) {
   const u = f.userData, zwaai = Math.sin(t * 0.8 + u.fase) > 0.55;
+  if (u.vlag) { u.armR.rotation.set(0.15, 0, 2.55 + 0.4 * Math.sin(t * 3.5 + u.fase)); u.vlag.rotation.x = 0.4 * Math.sin(t * 5 + u.fase); u.armL.rotation.set(0.1, 0, juich ? -2.4 : -0.12); return; }
   const hop = juich ? Math.max(0, Math.sin(t * 9 + u.fase)) * 0.06 : 0;
   f.children[0].position.y = hop;
   u.armL.position.y = u.armR.position.y = 1.28 + hop;
   u.armL.rotation.set(juich ? 0.2 : 0.1, 0, juich ? -2.6 - 0.2 * Math.sin(t * 9 + u.fase) : -0.12);
   u.armR.rotation.set(juich ? 0.2 : zwaai ? 0.3 : 0.1, 0, juich ? 2.6 + 0.2 * Math.sin(t * 9 + u.fase) : zwaai ? 2.3 + 0.35 * Math.sin(t * 7) : 0.12);
 }
-function maakPubliek(n, start, kant) {   // een rijtje mensen langs de baan, kant = 1 rechts, -1 links
+function maakPubliek(n, start, kant, vlagElke = 0) {   // een rijtje mensen langs de baan, kant = 1 rechts, -1 links; vlagElke: elke zoveelste zwaait een vlag
   const g = new THREE.Group();
   for (let i = 0; i < n; i++) {
-    const t = maakToeschouwer(start + i, i === 1 ? 0.72 : 0.95 + 0.05 * ((start + i) % 3));
-    t.position.set(kant * ((i % 2) * 0.3 + Math.sin(i * 2.3) * 0.08), 0, -i * 0.6); t.rotation.y = kant * (Math.PI / 2 + 0.55 + 0.15 * Math.sin(i * 3.1));
+    const t = maakToeschouwer(start + i, i === 1 ? 0.72 : 0.95 + 0.05 * ((start + i) % 3), vlagElke > 0 && i % vlagElke === vlagElke - 1);
+    t.position.set(kant * ((i % 2) * 0.28 + Math.sin(i * 2.3) * 0.05), 0, -i * 0.55); t.rotation.y = kant * (Math.PI / 2 + 0.55 + 0.15 * Math.sin(i * 3.1));
     g.add(t);
   }
   g.userData.publiek = g.children.slice();
@@ -412,7 +445,7 @@ function maakKoekEnZopie() {
     c.fillStyle = '#21468b'; c.beginPath(); c.roundRect(3, 3, w - 6, h - 6, 16); c.fill(); c.strokeStyle = '#ffffff'; c.lineWidth = 6; c.stroke();
     c.fillStyle = '#ffffff'; c.font = 'bold 66px Georgia, serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('Koek & Zopie', w / 2, h / 2 + 4); }) }));
   bord.position.set(0, 1.85, -0.36); bord.rotation.y = Math.PI; g.add(bord);
-  const verkoper = maakToeschouwer(5); verkoper.position.set(-0.25, 0, 0.45); g.add(verkoper);
+  const verkoper = maakToeschouwer(5); verkoper.position.set(-0.25, 0, 0.35); g.add(verkoper);
   g.userData.publiek = [verkoper];
   g.userData.stoom = [0, 1, 2].map(i => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: stoomTex, transparent: true, depthWrite: false })); sp.userData.f = i / 3; g.add(sp); return sp; });
   return g;
@@ -443,20 +476,26 @@ function maakBoerderij() {
   d.push([G.doos, '#2f5d3a', [1.2, 1.8, 1.75], [0, 0, 0], [1.4, 2.6, 0.05]], [G.doos, '#f4f8fc', [0, 4.6, -0.6], [0, 0, 0], [0.4, 0.8, 0.4]]);
   const g = new THREE.Group(); g.add(new THREE.Mesh(bouw(d), vcMat)); return g;
 }
-// knotwilg: dikke, iets scheve stam met een knobbelige kop en een waaier van lange gouden twijgen
+// knotwilg: knoestige, licht scheve stam met brede knot en een kroon van lange, boogvormige twijgen
 const wilgGeo = (() => {
-  const d = [[new THREE.CylinderGeometry(0.15, 0.22, 1.5, 10), '#5b5146', [0, 0.75, 0], [0, 0, 0.04]], [G.bolLaag, '#f4f8fc', [0, 0.04, 0], [0, 0, 0], [0.5, 0.08, 0.45]]];
-  for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; d.push([G.bolLaag, i % 2 ? '#4b4239' : '#574d42', [0.03 + Math.cos(a) * 0.12, 1.52 + (i % 3) * 0.04, Math.sin(a) * 0.12], [0, a, 0], [0.13, 0.11, 0.12]]); }
-  for (let i = 0; i < 4; i++) d.push([G.bol, '#3f372f', [Math.cos(i * 1.7) * 0.18, 0.5 + i * 0.25, Math.sin(i * 1.7) * 0.18], [0, 0, 0], [0.05, 0.07, 0.05]]);   // knoesten
-  d.push([G.bolLaag, '#f1f6fb', [0.03, 1.66, 0], [0, 0, 0], [0.22, 0.06, 0.2]]);
-  const kleuren = ['#9a6b32', '#b07a38', '#8a4f2a', '#a8642e', '#7d5a34'];
-  for (let i = 0; i < 30; i++) {
-    const a = i * 2.39996 + 0.3, t = 0.12 + (i % 5) * 0.09, L = 0.8 + ((i * 7) % 9) * 0.1;
-    const x0 = 0.03 + Math.cos(a) * 0.14, z0 = Math.sin(a) * 0.14, y0 = 1.6;
-    const m = [x0 + Math.cos(a) * Math.sin(t) * L * 0.55, y0 + Math.cos(t) * L * 0.55, z0 + Math.sin(a) * Math.sin(t) * L * 0.55];
-    const t2 = t + 0.12, e = [m[0] + Math.cos(a) * Math.sin(t2) * L * 0.45, m[1] + Math.cos(t2) * L * 0.45, m[2] + Math.sin(a) * Math.sin(t2) * L * 0.45];
-    const k = kleuren[i % kleuren.length];
-    d.push(staaf([x0, y0, z0], m, 0.016, 0.011, k), staaf(m, e, 0.011, 0.004, k));
+  const d = [];
+  d.push([new THREE.CylinderGeometry(0.19, 0.29, 0.32, 12), '#4f463d', [0, 0.16, 0]]);
+  d.push([new THREE.CylinderGeometry(0.16, 0.19, 1.35, 12), '#5d5248', [0.02, 0.95, 0], [0, 0, 0.05]]);
+  d.push([new THREE.CylinderGeometry(0.08, 0.12, 1.1, 8), '#4a4138', [0.11, 0.85, 0.04], [0.05, 0, 0.09]]);
+  d.push([new THREE.CylinderGeometry(0.07, 0.1, 0.9, 8), '#665a4e', [-0.1, 0.8, -0.05], [-0.04, 0, -0.06]]);
+  for (let i = 0; i < 5; i++) d.push([G.bol, '#3d352d', [Math.cos(i * 1.9) * 0.16, 0.45 + i * 0.22, Math.sin(i * 1.9) * 0.16], [0, 0, 0], [0.05, 0.075, 0.05]]);
+  for (let i = 0; i < 9; i++) { const a = i / 9 * Math.PI * 2; d.push([G.bolLaag, ['#4b4239', '#574d42', '#463d34'][i % 3], [0.05 + Math.cos(a) * 0.2, 1.66 + ((i * 5) % 3) * 0.04, Math.sin(a) * 0.2], [0, a, 0], [0.13 + (i % 2) * 0.04, 0.12, 0.12]]); }
+  d.push([G.bolLaag, '#f1f6fb', [0.05, 1.8, 0], [0, 0, 0], [0.3, 0.07, 0.28]], [G.bolLaag, '#f4f8fc', [0, 0.04, 0], [0, 0, 0], [0.55, 0.09, 0.5]]);
+  const kl = ['#a8722f', '#c08236', '#8f4f27', '#b5662c', '#7e5a33', '#9c7a45'];
+  for (let i = 0; i < 56; i++) {
+    const a = i * 2.39996, rr = 0.1 + ((i * 7) % 5) * 0.03, L = 0.7 + ((i * 11) % 13) * 0.11;
+    let t = 0.05 + ((i * 3) % 7) * 0.05, pnt = [0.05 + Math.cos(a) * rr, 1.76 + ((i * 5) % 4) * 0.02, Math.sin(a) * rr];
+    const k = kl[i % kl.length], r0 = 0.014 - (L < 1 ? 0.004 : 0);
+    for (let sgm = 0; sgm < 3; sgm++) {
+      const l = L / 3, nx = [pnt[0] + Math.cos(a) * Math.sin(t) * l, pnt[1] + Math.cos(t) * l, pnt[2] + Math.sin(a) * Math.sin(t) * l];
+      d.push(staaf(pnt, nx, r0 * (1 - sgm * 0.3), r0 * (1 - (sgm + 1) * 0.3) + 0.0015, k, 4));
+      pnt = nx; t += 0.16 + (i % 3) * 0.05;
+    }
   }
   return bouw(d);
 })();
@@ -467,16 +506,14 @@ const popGeo = bouw([[G.bol, '#f4f8fc', [0, 0.28, 0], [0, 0, 0], 0.3], [G.bol, '
 // x: afstand opzij, z: begin, per: na zoveel meter komt hij terug, ry: draaiing (0 = kijkt vooruit)
 const decor = [];
 function zetDecor(obj, x, z, per, ry = 0) { obj.userData.d = { x, z, per, ry }; obj.position.set(x, 0, z); obj.rotation.y = ry; wereld.add(obj); decor.push(obj); return obj; }
-zetDecor(maakPubliek(3, 0, 1), 2.15, -9, 55);
-zetDecor(maakPubliek(4, 4, -1), -2.15, -30, 55);
-zetDecor(maakKoekEnZopie(), -2.9, -48, 85, -Math.PI / 2 - 0.3);
+zetDecor(maakKoekEnZopie(), -2.2, -48, 85, -Math.PI / 2);
 zetDecor(maakMolen(), 7.5, -30, 110, Math.PI / 2 + 0.5).userData.achter = true;
 zetDecor(maakBoerderij(), -10, -45, 120, -Math.PI / 2 - 0.4).userData.achter = true;
-zetDecor(new THREE.Mesh(popGeo, vcMat), 2.4, -70, 95, Math.PI / 2 + 0.4);
-for (let i = 0; i < 6; i++) { const w = new THREE.Mesh(wilgGeo, vcMat); w.userData.schaal = 0.9 + (i % 3) * 0.12; zetDecor(w, (i % 2 ? 1 : -1) * (3.6 + (i % 3) * 0.9), -12 - i * 11, 66, i).userData.achter = true; }
+zetDecor(new THREE.Mesh(popGeo, vcMat), 2.15, -70, 95, Math.PI / 2 + 0.4);
+for (let i = 0; i < 6; i++) { const w = new THREE.Mesh(wilgGeo, vcMat); w.userData.schaal = 0.85 + (i % 3) * 0.15; zetDecor(w, (i % 2 ? 1 : -1) * (3.6 + (i % 3) * 0.9), -12 - i * 11, 66, i).userData.achter = true; }
 // ---------- Scherm vóór je: daarachter het Friese landschap, links en rechts blijft je kamer zichtbaar ----------
 // een onzichtbare muur met een gat erin schrijft alleen diepte: alles van de rit áchter de muur zie je dus alleen door het gat
-const SCHERM = { z: -4.5, b: 5.2, h: 3.0 };
+const SCHERM = { z: -4.5, b: 5.2, h: 3.3 };
 const veldTex = canvasTex(256, 256, (c, w, h) => {
   c.fillStyle = '#e9f0f6'; c.fillRect(0, 0, w, h);
   for (let i = 0; i < 40; i++) { c.strokeStyle = `rgba(150,175,200,${0.12 + Math.random() * 0.18})`; c.lineWidth = 2 + Math.random() * 4;
@@ -520,6 +557,15 @@ const landschap = (() => {
   wereld.add(g); return g;
 })();
 let juichT = -9;   // publiek juicht even na een gelukte opdracht
+function herbouwPubliek(nr) {
+  for (const o of [...decor]) if (o.userData.isPubliek) { wereld.remove(o); decor.splice(decor.indexOf(o), 1); }
+  const groepen = Math.min(7, 1 + Math.ceil(nr * 0.6)), n = 2 + Math.min(6, Math.floor(nr / 2)), vlag = nr >= 8 ? 2 : nr >= 4 ? 3 : 0, per = 12 * groepen + 30;
+  for (let i = 0; i < groepen; i++) {
+    const kant = i % 2 ? -1 : 1, o = zetDecor(maakPubliek(n, i * 3 + nr, kant, vlag), kant * 1.98, -9 - i * 12, per);
+    o.userData.isPubliek = true;
+  }
+}
+herbouwPubliek(1);
 function updateDecor(dt, snelheid, t) {
   const juich = t - juichT < 2.5;
   veldTex.offset.y += snelheid * dt / 15;
@@ -803,6 +849,61 @@ function tekenBord(r1, r2) {
   bordTex.needsUpdate = true;
 }
 
+// ---------- Wijsvlakken bij een splitsing: waar, hoe lang en wanneer je moet wijzen ----------
+const wijsVlak = [-1, 1].map(k => {
+  const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 300;
+  const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.234), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, depthTest: false }));
+  m.renderOrder = 13; m.visible = false; m.userData = { k, canvas, tex, sleutel: '' }; scene.add(m); return m;
+});
+function tekenWijsVlak(m, naam, vul, tijd, staat) {
+  const u = m.userData, sl = [naam, Math.round(vul * 20), Math.round(tijd * 30), staat].join('|');
+  if (sl === u.sleutel) return; u.sleutel = sl;
+  const c = u.canvas.getContext('2d'), cx = 128, cy = 118, k = u.k;
+  c.clearRect(0, 0, 256, 300);
+  c.fillStyle = staat === 'goed' ? 'rgba(46,139,87,0.85)' : staat === 'gekozen' ? 'rgba(67,191,253,0.85)' : 'rgba(24,18,38,0.6)';
+  c.beginPath(); c.arc(cx, cy, 100, 0, Math.PI * 2); c.fill();
+  c.lineCap = 'round';
+  if (tijd > 0) { c.strokeStyle = 'rgba(255,255,255,0.85)'; c.lineWidth = 8; c.beginPath(); c.arc(cx, cy, 112, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * tijd); c.stroke(); }   // resterende tijd
+  if (vul > 0) { c.strokeStyle = '#F6F01D'; c.lineWidth = 18; c.beginPath(); c.arc(cx, cy, 86, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * vul); c.stroke(); }   // hoe lang je al wijst
+  c.fillStyle = '#ffffff'; c.beginPath();   // pijl naar buiten
+  c.moveTo(cx + k * 58, cy); c.lineTo(cx + k * 8, cy - 46); c.lineTo(cx + k * 8, cy - 20); c.lineTo(cx - k * 50, cy - 20); c.lineTo(cx - k * 50, cy + 20); c.lineTo(cx + k * 8, cy + 20); c.lineTo(cx + k * 8, cy + 46); c.closePath(); c.fill();
+  c.fillStyle = '#ffffff'; pasLetter(c, naam, 240, 40); c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(naam, cx, 266);
+  u.tex.needsUpdate = true;
+}
+function plaatsWijsVlakken(p) {
+  const r = new THREE.Vector3(base.rechts.x, 0, base.rechts.y), f = new THREE.Vector3(base.vooruit.x, 0, base.vooruit.y);
+  for (const m of wijsVlak) { m.position.set(p.x, p.y - 0.15, p.z).addScaledVector(r, m.userData.k * 0.55).addScaledVector(f, 0.3); m.lookAt(p.x, p.y - 0.15, p.z); m.visible = true; m.userData.sleutel = ''; }
+}
+
+// ---------- Zwevende snelheidsmeter rechtsonder ----------
+const meterCanvas = document.createElement('canvas'); meterCanvas.width = 512; meterCanvas.height = 512;
+const meterTex = new THREE.CanvasTexture(meterCanvas); meterTex.colorSpace = THREE.SRGBColorSpace;
+const meter = new THREE.Mesh(new THREE.PlaneGeometry(0.27, 0.27), new THREE.MeshBasicMaterial({ map: meterTex, transparent: true, depthWrite: false }));
+meter.renderOrder = 9; wereld.add(meter);
+let meterV = 0, reeksOpRij = 0;
+function tekenMeter(kmu, meters, klaar, totaal, reeks) {
+  const c = meterCanvas.getContext('2d'), cx = 256, cy = 250;
+  c.clearRect(0, 0, 512, 512);
+  c.fillStyle = 'rgba(24,18,38,0.72)'; c.beginPath(); c.arc(cx, cy, 236, 0, Math.PI * 2); c.fill();
+  c.strokeStyle = 'rgba(255,255,255,0.55)'; c.lineWidth = 5; c.stroke();
+  const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, MAX = 20, f = Math.max(0, Math.min(1, kmu / MAX));
+  c.lineCap = 'round'; c.lineWidth = 22;
+  c.strokeStyle = 'rgba(255,255,255,0.16)'; c.beginPath(); c.arc(cx, cy, 196, a0, a1); c.stroke();
+  const gr = c.createLinearGradient(60, 0, 450, 0); gr.addColorStop(0, '#43BFFD'); gr.addColorStop(0.6, '#F6F01D'); gr.addColorStop(1, '#EB69BB');
+  c.strokeStyle = gr; c.beginPath(); c.arc(cx, cy, 196, a0, a0 + (a1 - a0) * f + 0.001); c.stroke();
+  c.fillStyle = 'rgba(255,255,255,0.75)'; c.font = '26px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  for (let k = 0; k <= MAX; k += 5) { const a = a0 + (a1 - a0) * k / MAX; c.fillText(k, cx + Math.cos(a) * 155, cy + Math.sin(a) * 155); }
+  const an = a0 + (a1 - a0) * f; c.strokeStyle = '#ffffff'; c.lineWidth = 7; c.beginPath(); c.moveTo(cx + Math.cos(an) * 40, cy + Math.sin(an) * 40); c.lineTo(cx + Math.cos(an) * 182, cy + Math.sin(an) * 182); c.stroke();
+  c.fillStyle = '#ffffff'; c.font = 'bold 104px system-ui, sans-serif'; c.fillText(Math.round(kmu), cx, cy - 6);
+  c.font = '30px system-ui, sans-serif'; c.fillStyle = '#d9d2e6'; c.fillText('km/u', cx, cy + 52);
+  c.font = 'bold 34px system-ui, sans-serif'; c.fillStyle = '#ffffff';
+  c.fillText(meters >= 1000 ? (meters / 1000).toFixed(2).replace('.', ',') + ' km' : Math.round(meters) + ' m', cx - 92, cy + 112);
+  c.fillText(`${klaar}/${totaal} ✓`, cx + 92, cy + 112);
+  if (reeks >= 2) { c.fillStyle = '#F6F01D'; c.font = 'bold 32px system-ui, sans-serif'; c.fillText(`★ ${reeks} goed op rij`, cx, cy + 170); }
+  meterTex.needsUpdate = true;
+}
+
 // ---------- Objecten voor de opdrachten ----------
 function maakWak(kant = -1) {   // kant: naar welke kant je moet stappen
   const g = new THREE.Group();
@@ -831,11 +932,32 @@ function maakWak(kant = -1) {   // kant: naar welke kant je moet stappen
   const bordje = new THREE.Group(); bordje.add(paal, plaat); bordje.position.set(-kant * 0.62, 0, 0); if (kant > 0) plaat.rotation.y = 0.25;
   g.add(water, rand, bordje); g.position.x = -kant * 0.15; return g;
 }
+// Fries bruggetje: gemetselde landhoofden, houten dek, witte leuningen met kruisjes en een wit ophaalportaal; publiek erop
 function maakBrug(hoogte) {
-  const g = new THREE.Group(), hout = new THREE.MeshLambertMaterial({ color: 0x7a4a24 });
-  for (const kant of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, hoogte + 0.2, 0.15), hout); p.position.set(kant * 1.25, (hoogte + 0.2) / 2, 0); g.add(p); }
-  const balk = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.16, 0.3), hout); balk.position.y = hoogte + 0.08; g.add(balk);
-  const leuning = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.05, 0.05), new THREE.MeshLambertMaterial({ color: 0xffffff })); leuning.position.set(0, hoogte + 0.3, 0.1); g.add(leuning);
+  const g = new THREE.Group(), d = [], dek = hoogte + 0.16, B = 1.15;
+  for (const k of [-1, 1]) {
+    d.push([G.doos, '#8e3b2c', [k * 1.95, hoogte / 2, 0], [0, 0, 0], [0.42, hoogte, B + 0.2]], [G.doos, '#cfc6b6', [k * 1.95, hoogte + 0.03, 0], [0, 0, 0], [0.46, 0.06, B + 0.24]]);
+    for (let r = 0; r < 4; r++) d.push([G.doos, '#7a3225', [k * (1.95 - 0.21), 0.2 + r * hoogte / 4, 0], [0, 0, 0], [0.01, 0.03, B + 0.2]]);   // voegen
+  }
+  d.push([G.doos, '#5a3a22', [0, hoogte + 0.08, 0], [0, 0, 0], [4.3, 0.16, B]]);
+  for (const z of [-1, 1]) {
+    d.push([G.doos, '#f2f2ee', [0, hoogte + 0.08, z * B / 2], [0, 0, 0], [4.32, 0.17, 0.04]]);
+    for (let i = 0; i <= 8; i++) d.push([G.doos, '#f2f2ee', [-2.0 + i * 0.5, dek + 0.38, z * (B / 2 - 0.03)], [0, 0, 0], [0.06, 0.76, 0.06]]);
+    d.push([G.doos, '#f2f2ee', [0, dek + 0.77, z * (B / 2 - 0.03)], [0, 0, 0], [4.1, 0.07, 0.08]], [G.doos, '#f2f2ee', [0, dek + 0.15, z * (B / 2 - 0.03)], [0, 0, 0], [4.1, 0.05, 0.05]]);
+    for (let i = 0; i < 8; i++) { const x0 = -2.0 + i * 0.5; d.push(staaf([x0, dek + 0.17, z * (B / 2 - 0.03)], [x0 + 0.5, dek + 0.75, z * (B / 2 - 0.03)], 0.018, 0.018, '#f2f2ee', 4), staaf([x0, dek + 0.75, z * (B / 2 - 0.03)], [x0 + 0.5, dek + 0.17, z * (B / 2 - 0.03)], 0.018, 0.018, '#f2f2ee', 4)); }
+  }
+  // wit ophaalportaal (hameipoort) aan de linkerkant
+  for (const z of [-1, 1]) d.push([G.doos, '#f7f7f3', [-1.5, dek + 0.75, z * (B / 2 + 0.05)], [0, 0, 0], [0.12, 1.5, 0.12]]);
+  d.push([G.doos, '#f7f7f3', [-1.5, dek + 1.5, 0], [0, 0, 0], [0.14, 0.12, B + 0.3]], [G.doos, '#2a2a2a', [-1.5, dek + 1.62, 0], [0, 0, 0], [0.16, 0.05, B + 0.34]]);
+  d.push(staaf([-2.2, dek + 1.2, 0], [-0.4, dek + 1.62, 0], 0.05, 0.04, '#f7f7f3', 6));
+  g.add(new THREE.Mesh(bouw(d), vcMat));
+  g.userData.publiek = [];
+  const n = Math.min(6, 2 + Math.floor(E.nr / 2));
+  for (let i = 0; i < n; i++) {
+    const t = maakToeschouwer(i * 3 + E.nr, 0.72, E.nr >= 4 && i % 3 === 2);
+    t.position.set(-1.0 + i * (2.4 / Math.max(1, n - 1)), dek, 0.18 + (i % 2) * 0.12); t.rotation.y = (i - n / 2) * 0.08;
+    g.add(t); g.userData.publiek.push(t);
+  }
   return g;
 }
 function maakWind() {
@@ -874,7 +996,7 @@ function maakSplitsing(stad, anders, juist) {
     if (pijlLinks) { c.moveTo(4, h / 2); c.lineTo(70, 6); c.lineTo(w - 6, 6); c.lineTo(w - 6, h - 6); c.lineTo(70, h - 6); }
     else { c.moveTo(w - 4, h / 2); c.lineTo(w - 70, 6); c.lineTo(6, 6); c.lineTo(6, h - 6); c.lineTo(w - 70, h - 6); }
     c.closePath(); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 8; c.stroke();
-    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = 'bold 80px system-ui, sans-serif'; c.fillText(naam, w / 2 + (pijlLinks ? 25 : -25), h / 2 + 4);
+    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; pasLetter(c, naam, w - 130, 80); c.fillText(naam, w / 2 + (pijlLinks ? 25 : -25), h / 2 + 4);
   });
   const links = juist < 0 ? stad : anders, rechts = juist < 0 ? anders : stad;
   for (const [kant, naam] of [[-1, links], [1, rechts]]) {
@@ -937,22 +1059,68 @@ function maakFinish() {
   const tex = canvasTex(1024, 220, (c, w, h) => {
     for (let i = 0; i < 32; i++) for (let j = 0; j < 2; j++) { c.fillStyle = (i + j) % 2 ? '#111' : '#fff'; c.fillRect(i * 32, j * 24, 32, 24); }
     c.fillStyle = '#21468b'; c.fillRect(0, 48, w, 172);
-    c.fillStyle = '#ffffff'; c.font = 'bold 110px system-ui, sans-serif'; c.textAlign = 'center'; c.fillText('FINISH ' + E.naar.toUpperCase(), w / 2, 175);
+    c.fillStyle = '#ffffff'; pasLetter(c, 'FINISH ' + E.naar.toUpperCase(), w - 70, 110); c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('FINISH ' + E.naar.toUpperCase(), w / 2, 136);
   });
   const doek = new THREE.Mesh(new THREE.PlaneGeometry(2.9, 0.62), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); doek.position.y = 2.3; g.add(doek);
-  // tribune met juichend publiek, net voorbij de finish
-  const trib = [];
-  for (let i = 0; i < 3; i++) trib.push([G.doos, i % 2 ? '#8a5a2b' : '#9c6a36', [0, 0.15 * (i + 1), 0.3 - i * 0.45], [0, 0, 0], [1.9, 0.3 * (i + 1), 0.45]]);
-  trib.push([G.doos, '#6b4423', [0, 0.7, -0.85], [0, 0, 0], [1.95, 1.4, 0.06]]);
-  const tribune = new THREE.Mesh(bouw(trib), vcMat); tribune.position.set(2.65, 0, -1.2); tribune.rotation.y = -Math.PI / 2; g.add(tribune);
+  // publiek vlak achter de finish, binnen de breedte van het scherm (anders komt het door de paal)
   g.userData.publiek = [];
-  for (let i = 0; i < 6; i++) {
-    const rij = i % 3, t = maakToeschouwer(i + 3, i === 4 ? 0.75 : 1);
-    t.position.set(2.65 - 0.3 + rij * 0.45, 0.3 + rij * 0.3, -1.2 + (i < 3 ? -0.45 : 0.45) + (rij - 1) * 0.1); t.rotation.y = Math.PI / 2 + 0.5;
+  const n = Math.min(12, 2 + E.nr);
+  for (const kant of [-1, 1]) for (let i = 0; i < n; i++) {
+    const t = maakToeschouwer(i * 2 + kant + E.nr, 0.9 + 0.08 * ((i * 7) % 3) / 2, E.nr >= 5 && i % 3 === 1);
+    t.position.set(kant * (1.95 + (i % 2) * 0.28), 0, -0.3 - i * 0.42); t.rotation.y = kant * (Math.PI / 2 + 0.6);
     g.add(t); g.userData.publiek.push(t);
   }
   return g;
 }
+// feest bij aankomst: verschijnt om je heen als je gefinisht bent (groter naarmate de etappe verder is; in Leeuwarden bomvol)
+let feest = null;
+function maakCameraploeg(kant) {
+  const g = new THREE.Group(), t = maakToeschouwer(7 + kant, 1); t.rotation.y = Math.PI; g.add(t);
+  t.userData.armR.rotation.set(0.2, 0, 2.7); t.userData.armL.rotation.set(1.2, 0, -0.3);
+  const cam = new THREE.Mesh(bouw([[G.doos, '#2a2a2e', [0, 0, 0], [0, 0, 0], [0.16, 0.18, 0.36]], [G.cil, '#111114', [0, 0.01, 0.22], [Math.PI / 2, 0, 0], [0.055, 0.12, 0.055]],
+    [G.doos, '#d62828', [0, 0.11, -0.08], [0, 0, 0], [0.04, 0.03, 0.04]], [G.doos, '#3a3a40', [0, 0.12, 0.05], [0, 0, 0], [0.04, 0.05, 0.16]]]), vcMat);
+  cam.position.set(-0.2, 1.5, 0.05); g.add(cam);
+  if (kant > 0) {   // tweede ploeg met statief
+    const st = new THREE.Mesh(bouw([staaf([0.35, 0, 0.25], [0.35, 1.3, 0.45], 0.012, 0.01, '#333'), staaf([0.15, 0, 0.6], [0.35, 1.3, 0.45], 0.012, 0.01, '#333'), staaf([0.55, 0, 0.6], [0.35, 1.3, 0.45], 0.012, 0.01, '#333'),
+      [G.doos, '#2a2a2e', [0.35, 1.4, 0.45], [0, 0, 0], [0.18, 0.2, 0.4]], [G.cil, '#111114', [0.35, 1.41, 0.7], [Math.PI / 2, 0, 0], [0.07, 0.14, 0.07]]]), vcMat);
+    g.add(st);
+  }
+  return g;
+}
+function maakFeest(nr) {
+  const g = new THREE.Group(); g.userData.publiek = []; g.userData.vlaggen = [];
+  const voeg = (t) => { g.add(t); g.userData.publiek.push(t); };
+  if (nr >= 4) {   // tribune rechts
+    const trib = [];
+    for (let i = 0; i < 3; i++) trib.push([G.doos, i % 2 ? '#8a5a2b' : '#9c6a36', [0, 0.15 * (i + 1), 0.3 - i * 0.45], [0, 0, 0], [2.6, 0.3 * (i + 1), 0.45]]);
+    trib.push([G.doos, '#6b4423', [0, 0.7, -0.85], [0, 0, 0], [2.65, 1.4, 0.06]]);
+    const tribune = new THREE.Mesh(bouw(trib), vcMat); tribune.position.set(3.0, 0, -1.4); tribune.rotation.y = -Math.PI / 2; g.add(tribune);
+    for (let i = 0; i < 9; i++) { const rij = i % 3, t = maakToeschouwer(i + nr, 0.95, i % 4 === 0); t.position.set(2.7 + rij * 0.45, 0.3 + rij * 0.3, -2.4 + Math.floor(i / 3) * 0.8 + rij * 0.12); t.rotation.y = Math.PI / 2 + 0.5; voeg(t); }
+  }
+  const rijen = nr >= 11 ? 3 : nr >= 7 ? 2 : 1, perRij = Math.min(10, 3 + nr);
+  for (const kant of [-1, 1]) for (let r = 0; r < rijen; r++) for (let i = 0; i < perRij; i++) {
+    if (kant > 0 && nr >= 4 && r === 0 && i < 5) continue;   // daar staat de tribune
+    const t = maakToeschouwer(i + r * 5 + kant + nr, 0.85 + 0.1 * ((i + r) % 3) / 2, (i + r) % 2 === 0);
+    t.position.set(kant * (2.6 + r * 0.42 + (i % 2) * 0.1), 0, 0.8 - i * 0.48 - r * 0.2); t.rotation.y = kant * (Math.PI / 2 + 0.45); voeg(t);
+  }
+  if (nr >= 9) { const c1 = maakCameraploeg(-1); c1.position.set(-1.6, 0, -1.6); g.add(c1); }
+  if (nr >= 11) {
+    const c2 = maakCameraploeg(1); c2.position.set(1.4, 0, -2.2); g.add(c2);
+    for (let i = 0; i < 6; i++) {   // grote vlaggen
+      const kant = i % 2 ? 1 : -1, x = kant * (3.2 + (i % 3) * 0.3), z = -2.8 + i * 0.6;
+      g.add(Object.assign(new THREE.Mesh(bouw([staaf([0, 0, 0], [0, 2.8, 0], 0.025, 0.02, '#e8e2d4', 6)]), vcMat), { position: new THREE.Vector3(x, 0, z) }));
+      const vl = new THREE.Mesh(vlagGeo, new THREE.MeshLambertMaterial({ map: vlagTex[i % 2], side: THREE.DoubleSide })); vl.scale.setScalar(3.2); vl.position.set(x, 2.55, z); g.add(vl); g.userData.vlaggen.push(vl);
+    }
+  }
+  g.scale.setScalar(0.01); wereld.add(g); return g;
+}
+function updateFeest(t) {
+  if (!feest) return;
+  feest.scale.setScalar(Math.min(1, feest.scale.x + 0.04));
+  for (const p of feest.userData.publiek) zetToeschouwer(p, t, true);
+  feest.userData.vlaggen.forEach((v, i) => v.rotation.y = (i % 2 ? Math.PI : 0) + 0.35 * Math.sin(t * 2.5 + i));
+}
+function wisFeest() { if (feest) { wereld.remove(feest); feest = null; } }
 // het Elfstedenkruisje: je beloning bij de finish
 const kruisje = (() => {
   const g = new THREE.Group(), vorm = new THREE.Shape(), P = [[-0.14, 0.14], [-0.34, 1], [0.34, 1], [0.14, 0.14], [1, 0.34], [1, -0.34], [0.14, -0.14], [0.34, -1], [-0.34, -1], [-0.14, -0.14], [-1, -0.34], [-1, 0.34]];
@@ -971,7 +1139,7 @@ function tekenKaart(g, w, h, stad, gestempeld) {
   g.clearRect(0, 0, w, h);
   g.fillStyle = '#fbf3dc'; g.beginPath(); g.roundRect(4, 4, w - 8, h - 8, 26); g.fill();
   g.strokeStyle = '#215C9A'; g.lineWidth = 8; g.stroke();
-  g.fillStyle = '#215C9A'; g.textAlign = 'center'; g.font = 'bold 44px system-ui, sans-serif'; g.fillText('Stempelkaart · ' + stad, w / 2, 62);
+  g.fillStyle = '#215C9A'; g.textAlign = 'center'; pasLetter(g, 'Stempelkaart · ' + stad, w - 50, 44); g.fillText('Stempelkaart · ' + stad, w / 2, 62);
   if (!gestempeld) {
     g.strokeStyle = '#c9a400'; g.lineWidth = 10; g.setLineDash([22, 14]); g.beginPath(); g.arc(w / 2, h / 2 + 30, 92, 0, Math.PI * 2); g.stroke(); g.setLineDash([]);
     g.fillStyle = '#8a7a40'; g.font = '34px system-ui, sans-serif'; g.fillText('stempel', w / 2, h / 2 + 42);
@@ -979,7 +1147,7 @@ function tekenKaart(g, w, h, stad, gestempeld) {
     g.save(); g.translate(w / 2, h / 2 + 30); g.rotate(-0.25);
     g.strokeStyle = g.fillStyle = '#c0182b'; g.lineWidth = 12; g.beginPath(); g.arc(0, 0, 100, 0, Math.PI * 2); g.stroke();
     g.lineWidth = 4; g.beginPath(); g.arc(0, 0, 82, 0, Math.PI * 2); g.stroke();
-    g.font = 'bold 46px system-ui, sans-serif'; g.textBaseline = 'middle'; g.fillText(stad.toUpperCase(), 0, -12); g.font = 'bold 30px system-ui, sans-serif'; g.fillText('11-STEDEN', 0, 34);
+    pasLetter(g, stad.toUpperCase(), 150, 46, 18); g.textBaseline = 'middle'; g.fillText(stad.toUpperCase(), 0, -12); g.font = 'bold 30px system-ui, sans-serif'; g.fillText('11-STEDEN', 0, 34);
     g.restore();
   }
 }
@@ -1022,7 +1190,7 @@ function maakKraam(kant, reik, stad) {
   const luifel = new THREE.Mesh(new THREE.PlaneGeometry(Math.abs(xb - xa), 1.15).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ map: luifelTex, side: THREE.DoubleSide }));
   luifel.position.set((xa + xb) / 2, 2.1, 0); g.add(luifel);
   const btex = canvasTex(512, 160, (c, w, h) => { c.fillStyle = '#215C9A'; c.beginPath(); c.roundRect(4, 4, w - 8, h - 8, 20); c.fill(); c.strokeStyle = '#fff'; c.lineWidth = 8; c.stroke();
-    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = 'bold 84px system-ui, sans-serif'; c.fillText(stad, w / 2, h / 2 + 4); });
+    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle'; pasLetter(c, stad, w - 50, 84); c.fillText(stad, w / 2, h / 2 + 4); });
   const bordStad = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.19), new THREE.MeshBasicMaterial({ map: btex, side: THREE.DoubleSide }));
   bordStad.rotation.y = -kant * Math.PI / 2; bordStad.position.set(xa, 1.98, 0); g.add(bordStad);
   g.userData = { kraam: true, st, stempel, vak, stad, sx: zx, H, s: 0,
@@ -1048,17 +1216,40 @@ for (const v of ['thumb', 'index-finger', 'middle-finger', 'ring-finger', 'pinky
     const n = `${v}-${d}`; GEWRICHTEN.push(n); BOTTEN.push([vorige, n]); vorige = n;
   }
 }
-const kogelGeo = new THREE.SphereGeometry(1, 8, 6);
-const handMat = new THREE.MeshBasicMaterial({ color: 0xe8f6ff, transparent: true, opacity: 0.85 });
-const handLijnMat = new THREE.LineBasicMaterial({ color: 0x9fdcff, transparent: true, opacity: 0.9 });
+// je handen als handschoenen (passend bij je eigen lijf): ronde vingerkootjes, gewrichten en een handpalm
+const kogelGeo = new THREE.SphereGeometry(1, 10, 8), kootGeo = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
+const handMat = new THREE.MeshToonMaterial({ color: 0xe8eef5, gradientMap: toonGrad, transparent: true, opacity: 0.88 });
+const manchetMat = new THREE.MeshToonMaterial({ color: 0x3a6ea5, gradientMap: toonGrad, transparent: true, opacity: 0.85 });
 const handVis = {};
 function handVisual(kant) {
   if (handVis[kant]) return handVis[kant];
   const g = new THREE.Group(); scene.add(g);
   const kogels = {}; for (const n of GEWRICHTEN) { const m = new THREE.Mesh(kogelGeo, handMat); g.add(m); kogels[n] = m; }
-  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(BOTTEN.length * 6), 3));
-  const lijnen = new THREE.LineSegments(geo, handLijnMat); lijnen.frustumCulled = false; g.add(lijnen);
-  return (handVis[kant] = { g, kogels, lijnen });
+  const koten = BOTTEN.map(([a, b]) => { const m = new THREE.Mesh(kootGeo, handMat); m.userData.bot = [a, b]; m.visible = !a.endsWith('wrist') || b.startsWith('thumb'); g.add(m); return m; });
+  const palm = new THREE.Mesh(kogelGeo, handMat); g.add(palm);
+  const manchet = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.04, 0.07, 12), manchetMat); g.add(manchet);
+  return (handVis[kant] = { g, kogels, koten, palm, manchet });
+}
+const _hv = { a: new THREE.Vector3(), b: new THREE.Vector3(), d: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3(), m: new THREE.Matrix4(), q: new THREE.Quaternion() };
+function tekenHand(vis, pos, polsQ) {
+  for (const n of GEWRICHTEN) { const m = vis.kogels[n]; if (pos[n] && !n.endsWith('metacarpal')) { m.visible = true; m.position.copy(pos[n]); m.scale.setScalar(Math.max(0.006, pos[n].r * 1.05)); } else m.visible = false; }
+  for (const m of vis.koten) {
+    const [a, b] = m.userData.bot, pa = pos[a], pb = pos[b];
+    if (!pa || !pb || (a === 'wrist' && !b.startsWith('thumb'))) { m.visible = false; continue; }
+    m.visible = true; _hv.d.subVectors(pb, pa); const len = _hv.d.length();
+    m.position.copy(pa).addScaledVector(_hv.d, 0.5); m.quaternion.setFromUnitVectors(_yAs, _hv.d.normalize());
+    const r = Math.max(0.006, Math.min(pa.r, pb.r) * 1.0); m.scale.set(r, len, r);
+  }
+  // handpalm: platte bol tussen pols en knokkels
+  const w = pos.wrist, mi = pos['middle-finger-phalanx-proximal'] || pos['middle-finger-metacarpal'], ix = pos['index-finger-phalanx-proximal'], pk = pos['pinky-finger-phalanx-proximal'];
+  if (w && mi && ix && pk) {
+    _hv.y.subVectors(mi, w); const len = _hv.y.length(); _hv.y.normalize();
+    _hv.x.subVectors(pk, ix); const br = _hv.x.length(); _hv.x.addScaledVector(_hv.y, -_hv.x.dot(_hv.y)).normalize();
+    _hv.z.crossVectors(_hv.x, _hv.y).normalize();
+    vis.palm.visible = true; vis.palm.position.copy(w).addScaledVector(_hv.y, len * 0.55);
+    vis.palm.quaternion.setFromRotationMatrix(_hv.m.makeBasis(_hv.x, _hv.y, _hv.z)); vis.palm.scale.set(Math.max(0.03, br * 0.62), len * 0.6, 0.016);
+    vis.manchet.visible = true; vis.manchet.position.copy(w).addScaledVector(_hv.y, -0.03); vis.manchet.quaternion.copy(vis.palm.quaternion);
+  } else vis.palm.visible = vis.manchet.visible = false;
 }
 const kaartPlat = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 // tekent je handen en geeft per hand de plek waar de stempelkaart zit
@@ -1077,10 +1268,7 @@ function updateHanden(frame, ref) {
       if (!pos.wrist || !pos['index-finger-tip']) continue;
       gezien.add(kant);
       const vis = handVisual(kant); vis.g.visible = true;
-      for (const n of GEWRICHTEN) { const m = vis.kogels[n]; if (pos[n]) { m.visible = true; m.position.copy(pos[n]); m.scale.setScalar(Math.max(0.005, pos[n].r * 0.9)); } else m.visible = false; }
-      const arr = vis.lijnen.geometry.attributes.position.array;
-      BOTTEN.forEach(([a, b], i) => { const pa = pos[a] || pos.wrist, pb = pos[b] || pa; arr.set([pa.x, pa.y, pa.z, pb.x, pb.y, pb.z], i * 6); });
-      vis.lijnen.geometry.attributes.position.needsUpdate = true;
+      tekenHand(vis, pos, polsQ);
       const duim = pos['thumb-tip'] || pos['index-finger-tip'];
       const mid = pos['index-finger-tip'].clone().add(duim).multiplyScalar(0.5);
       const richting = mid.clone().sub(pos.wrist).normalize();
@@ -1235,7 +1423,7 @@ function maakDorpsbord(naam) {
     c.fillStyle = '#ffffff'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(naam, w / 2, h / 2 + 3);
   });
   const plaat = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.29), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })); plaat.position.y = 1.2; g.add(plaat);
-  g.rotation.y = -0.35; g.userData.dorp = naam; wereld.add(g); return g;
+  g.rotation.y = -0.2; g.userData.dorp = naam; wereld.add(g); return g;
 }
 function updateDorpen(dt) {
   if (fase === 'rit' && E.dorpen) for (const [naam, idx] of E.dorpen) {
@@ -1243,9 +1431,9 @@ function updateDorpen(dt) {
     if (tijdVoor && !dorpGehad.has(naam)) { dorpGehad.add(naam); dorpRij.push(naam); }
   }
   const laatste = dorpBorden[dorpBorden.length - 1];
-  if (dorpRij.length && (!laatste || laatste.position.z > -22)) { const b = maakDorpsbord(dorpRij.shift()); b.position.set(2.45, 0, -30); dorpBorden.push(b); }
+  if (dorpRij.length && (!laatste || laatste.position.z > -22)) { const b = maakDorpsbord(dorpRij.shift()); b.position.set(2.05, 0, -30); dorpBorden.push(b); }
   for (const b of [...dorpBorden]) {
-    b.position.z += v * dt; b.position.x = 2.45 + bochtX(-b.position.z); b.scale.setScalar(Math.min(1, (34 + b.position.z) / 4));
+    b.position.z += v * dt; b.position.x = 2.05 + bochtX(-b.position.z); b.scale.setScalar(Math.min(1, (34 + b.position.z) / 4));
     if (b.position.z > 6) { wereld.remove(b); dorpBorden.splice(dorpBorden.indexOf(b), 1); }
   }
 }
@@ -1378,7 +1566,7 @@ let aanmoedigT = 0, langzaamT = 0, ritBasisY = 1.6, ritten = [], volgendeT = 0, 
 let meting = null;
 function startRit(p) {
   zetWolk('Daar gaan we!'); fase = 'rit'; faseT = 0; ritT = 0; opdrIndex = 0; afstand = 0; resultaten = []; slagen = 0; ritBasisY = p.y; volgendeT = 0;
-  gebeurtenis('rit-start', { etappe: E.nr, niveau: { ...niveau } }); wisDorpen();
+  gebeurtenis('rit-start', { etappe: E.nr, niveau: { ...niveau } }); wisDorpen(); reeksOpRij = 0;
 }
 // hoe ver zit je hand (de stempelkaart) opzij van het midden van de baan, naar kant k?
 function reikOpzij(h, k) {
@@ -1393,7 +1581,8 @@ function zetBase(p, q) {
   base = { x: p.x, z: p.z, y: p.y, vooruit, rechts: new THREE.Vector2(-vooruit.y, vooruit.x) };
   wereld.position.set(p.x, 0, p.z); wereld.rotation.y = Math.atan2(-vooruit.x, -vooruit.y); wereld.visible = true;
   base.wolkY = Math.max(p.y + 0.3, 1.95);
-  bord.position.set(1.1, Math.max(p.y - 0.15, 1.1), -2.2); bord.rotation.y = -0.35; bord.userData.x0 = 1.1;
+  bord.position.set(1.1, Math.max(p.y - 0.15, 1.1), -2.2); bord.rotation.y = -0.35; bord.userData.x0 = 1.1; bord.visible = false;   // (oude paaltje; vervangen door de zwevende meter)
+  meter.position.set(0.5, Math.max(0.65, p.y - 0.8), -0.72); wereld.updateMatrixWorld(true); meter.lookAt(wereld.localToWorld(new THREE.Vector3(0, p.y, 0)));
   if (!bord.userData.paal) { bord.userData.paal = new THREE.Mesh(G.cil6, tm('#5a3a1e')); bord.add(bord.userData.paal); }
   bord.userData.paal.scale.set(0.025, bord.position.y - 0.08, 0.025); bord.userData.paal.position.set(0, -(bord.position.y + 0.08) / 2, -0.01);
   gebeurtenis('opgesteld', { y: +p.y.toFixed(3) });
@@ -1538,8 +1727,8 @@ function update(p, q, frame, ref, dt) {
         if (opdr.id === 'brug') doelPose.buk = (zObj > -3.8 && zObj < -1.6) ? 1 : 0;
         if (opdr.id === 'wind' && !opdr.klaar) doelPose.rug = 1;
         if (opdr.id === 'splits') doelPose.zij = -0.5;   // maatje schuift opzij zodat de wegwijzer goed te zien is
-        const gelukt = () => { opdr.klaar = true; opdr.gelukt = true; opdr.klaarT = ot; juichT = tijd; pasAan(opdr.id, true); geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +(opdr.reactie ?? ot).toFixed(2), ...(opdr.detail || {}) }); };
-        const mislukt = () => { opdr.klaar = true; opdr.klaarT = ot; pasAan(opdr.id, false); geluid.mis(); zetWolk(opdr.mis); gebeurtenis('mislukt', { id: opdr.id, ...(opdr.detail || {}) }); };
+        const gelukt = () => { opdr.klaar = true; opdr.gelukt = true; opdr.klaarT = ot; juichT = tijd; reeksOpRij++; pasAan(opdr.id, true); geluid.goed(); zetWolk(opdr.goed, '#5ee08a'); gebeurtenis('gelukt', { id: opdr.id, reactie: +(opdr.reactie ?? ot).toFixed(2), ...(opdr.detail || {}) }); };
+        const mislukt = () => { opdr.klaar = true; opdr.klaarT = ot; reeksOpRij = 0; pasAan(opdr.id, false); geluid.mis(); zetWolk(opdr.mis); gebeurtenis('mislukt', { id: opdr.id, ...(opdr.detail || {}) }); };
         if (!opdr.klaar) {
           if (opdr.id === 'stempel') {
             // het kraampje komt aanglijden en stopt naast je; de baan remt mee af
@@ -1629,7 +1818,7 @@ function update(p, q, frame, ref, dt) {
           } else if (opdr.id === 'splits') {
             // let op: het maatje doet hier niets voor, anders verklapt hij het antwoord
             const kiesVanaf = NADER - opdr.kiesTijd;
-            if (ot > kiesVanaf && !opdr.nu) { opdr.nu = true; opdr.nuT = ot; zetWolk('Welke kant? Wijs het aan!', '#EB69BB'); toon(990, 0.1); }
+            if (ot > kiesVanaf && !opdr.nu) { opdr.nu = true; opdr.nuT = ot; zetWolk('Welke kant? Wijs het aan!', '#EB69BB'); toon(990, 0.1); plaatsWijsVlakken(p); }
             if (opdr.nu) {
               // aanwijzen: je geeft je maatje de richting aan met een gestrekte arm (hand ver genoeg opzij, niet te laag)
               let kant = 0, hoe = 'wijzen';
@@ -1642,7 +1831,10 @@ function update(p, q, frame, ref, dt) {
               if (kant !== 0 && kant === opdr.kantNu) opdr.hold += dt; else { opdr.hold = 0; opdr.kantNu = kant; }
               const b = object.userData.borden;
               if (b) for (const k of [-1, 1]) b[k].scale.setScalar(1 + (k === kant ? 0.25 * Math.min(1, opdr.hold / D.wijsTijd) : 0));
-              if (ot - opdr.nuT > 2 && !kant) zetWolk('Wijs met je arm naar de kant!', '#EB69BB');
+              const restT = Math.max(0, NADER + 0.3 - ot), tijdF = restT / (opdr.kiesTijd + 0.3);
+              for (const m of wijsVlak) { const k = m.userData.k; tekenWijsVlak(m, k === opdr.juist ? opdr.stad : opdr.anders, k === kant ? Math.min(1, opdr.hold / D.wijsTijd) : 0, tijdF, k === kant ? 'gekozen' : ''); }
+              if (!kant) zetWolk(ot - opdr.nuT > 1.2 ? `Wijs aan! Nog ${Math.ceil(restT)}` : 'Welke kant? Wijs het aan!', '#EB69BB');
+              else zetWolk('Vasthouden…', '#43BFFD');
               const naam = k => (k === opdr.juist ? opdr.stad : opdr.anders);
               if (opdr.hold >= (hoe === 'stap' ? D.stapTijd : D.wijsTijd)) {
                 opdr.reactie = ot - opdr.nuT - D.wijsTijd; opdr.keuze = laatsteKeuze = kant; opdr.hoe = hoe;
@@ -1695,6 +1887,10 @@ function update(p, q, frame, ref, dt) {
           doelPose.juich = opdr.gelukt && ot - opdr.klaarT < 2 ? 1 : 0;
           if (opdr.id === 'wak' && opdr.gelukt && opdr.kant * lat > 0.12 && ot - opdr.klaarT > 1.5) zetWolk('Kom maar weer terug naar het midden');
           if (opdr.id === 'splits' && ot - opdr.klaarT < 1.5) doelPose.reik = opdr.keuze;   // het maatje volgt jouw aanwijzing
+          if (opdr.id === 'splits') for (const m of wijsVlak) {   // gekozen vlak licht even op, het andere verdwijnt
+            m.visible = ot - opdr.klaarT < 0.9 && m.userData.k === opdr.keuze && opdr.hoe !== undefined;
+            if (m.visible) tekenWijsVlak(m, opdr.keuze === opdr.juist ? opdr.stad : opdr.anders, 1, 0, opdr.gelukt ? 'goed' : 'gekozen');
+          }
           if (opdr.id === 'bocht' && opdr.vObj) { opdr.vZ += v * dt; opdr.vObj.position.set(bochtX(-opdr.vZ), 0, opdr.vZ); }
           let klaarVoorVolgende = ot - opdr.klaarT > 3 && ot > NADER + 2;
           if (opdr.id === 'haas') { opdr.gap -= (v - opdr.vH * 0.7) * dt; klaarVoorVolgende = opdr.gap < -3 || ot - opdr.klaarT > 5; }
@@ -1745,7 +1941,7 @@ function update(p, q, frame, ref, dt) {
       if (object && object.userData.finish) {
         object.position.z = -14 + Math.min(ritT - object.userData.start, NADER + 1) * (14 / NADER);
         if (ritT - object.userData.start > NADER) {
-          fase = 'einde'; faseT = 0; geluid.finish();
+          fase = 'einde'; faseT = 0; geluid.finish(); wisFeest(); feest = maakFeest(E.nr);
           const n = resultaten.filter(r => r.gelukt).length;
           zetWolk(`Gefinisht in ${E.naar}! ${n} van de ${OPDRACHTEN.length} gelukt. Stempel erbij!`, '#F6F01D'); juichT = tijd; gebeurtenis('finish', { etappe: E.nr, score: n, slagen, afstand: Math.round(afstand), niveau: { ...niveau } });
           ritten.push({ etappe: E.nr, naam: `${E.van} – ${E.naar}`, score: n, van: OPDRACHTEN.length, slagen, afstand: Math.round(afstand), resultaten: [...resultaten], niveau: { ...niveau } });
@@ -1805,7 +2001,8 @@ function update(p, q, frame, ref, dt) {
   updateLijf(p, q, { left: handInfo.left && handInfo.left.pols, right: handInfo.right && handInfo.right.pols }, lat, dt);
   // het Elfstedenkruisje zweeft voor je bij de finish
   const beloning = E.nr === 11 ? kruisje : kaart, toonBeloning = fase === 'einde' && faseT > 1.2;
-  if (fase !== 'einde') menu.visible = false;
+  if (fase !== 'einde') { menu.visible = false; if (feest) wisFeest(); } else updateFeest(tijd);
+  if (!(opdr && opdr.id === 'splits' && opdr.nu)) for (const m of wijsVlak) m.visible = false;
   kruisje.visible = toonBeloning && E.nr === 11;
   if (toonBeloning) {
     const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; f.normalize();
@@ -1830,7 +2027,9 @@ function update(p, q, frame, ref, dt) {
   if (base) {
     if (Math.floor(tijd * 4) !== Math.floor((tijd - dt) * 4)) {
       const opdrNr = Math.min(opdrIndex + (opdr ? 1 : 0), OPDRACHTEN.length);
-      tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : opdr && opdr.id === 'stempel' && !opdr.klaar ? `stempelpost ${opdr.stad}` : opdr && opdr.id === 'bocht' && !opdr.klaar ? (opdr.richting < 0 ? 'bocht naar links' : 'bocht naar rechts') : opdr && opdr.id === 'splits' && !opdr.klaar ? 'welke kant?' : opdr && opdr.id === 'haas' && !opdr.klaar ? `haas: ${Math.max(0, Math.round(opdr.gap))} m · ${Math.round(v * 3.6)} km/u` : `opdracht ${opdrNr}/${OPDRACHTEN.length} · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : `etappe ${E.nr}`);
+      meterV += (v * 3.6 - meterV) * 0.6;
+      tekenMeter(fase === 'opstellen' ? 0 : meterV, afstand, resultaten.filter(r => r.gelukt).length, OPDRACHTEN.length, reeksOpRij);
+      if (false) tekenBord(`${Math.round(afstand)} m`, fase === 'rit' ? (opdr && opdr.id === 'wind' ? `handen in beeld: ${handen}` : opdr && opdr.id === 'stempel' && !opdr.klaar ? `stempelpost ${opdr.stad}` : opdr && opdr.id === 'bocht' && !opdr.klaar ? (opdr.richting < 0 ? 'bocht naar links' : 'bocht naar rechts') : opdr && opdr.id === 'splits' && !opdr.klaar ? 'welke kant?' : opdr && opdr.id === 'haas' && !opdr.klaar ? `haas: ${Math.max(0, Math.round(opdr.gap))} m · ${Math.round(v * 3.6)} km/u` : `opdracht ${opdrNr}/${OPDRACHTEN.length} · ${Math.round(v * 3.6)} km/u`) : fase === 'einde' ? 'gefinisht!' : `etappe ${E.nr}`);
     }
   }
 }
@@ -1853,12 +2052,13 @@ function voorbeeld(t) {
     else if (o === 'publiek') { plaatsObject(maakVaantje(1, 0.85, 1.1)); }
     else if (o === 'haas') { plaatsObject(maakHaas()); object.userData.vbHaas = true; }
     else if (o === 'wak-rechts') plaatsObject(maakWak(1));
-    else if (o === 'dorp') { const b = maakDorpsbord('Dearsumerhûske'); b.position.set(2.45, 0, -4); }
+    else if (o === 'feest') { E = ETAPPES[10]; plaatsObject(maakFinish()); object.position.z = 0; herbouwPubliek(11); }
+    else if (o === 'dorp') { const b = maakDorpsbord('Dearsumerhûske'); b.position.set(2.05, 0, -4); }
     else if (o === 'kruisje') { kruisje.visible = true; kruisje.position.set(0, 1.5, -0.6); kruisje.scale.setScalar(1); }
     else if (o === 'bocht' || o === 'bocht-rechts') { const r = o === 'bocht' ? -1 : 1; plaatsObject(maakBochtBorden(r)); bochtK = r * D.bochtK; bochtD0 = 3; }
     else if (o === 'stempel' || o === 'stempel-links') { plaatsObject(maakKraam(o === 'stempel' ? 1 : -1, o === 'stempel' ? 0.95 : 1.05, o === 'stempel' ? 'Sneek' : 'IJlst')); zetKaart(o === 'stempel' ? 'Sneek' : 'IJlst', true); }
     else if (o === 'wak') plaatsObject(maakWak()); else if (o === 'brug') plaatsObject(maakBrug(1.69)); else if (o === 'wind') plaatsObject(maakWind()); else if (o === 'finish') plaatsObject(maakFinish());
-    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? 0 : object.userData.vaantjeGroep ? -1.8 : -5;
+    if (object && !object.isLineSegments && !object.userData.bocht) object.position.z = object.userData.kraam ? -1.6 : object.userData.splits ? 0 : object.userData.vaantjeGroep ? -1.8 : o === 'feest' ? -0.5 : -5;
     if (o && o.startsWith('bocht')) zetBalk(0.6);
     const opd = o === 'stempel-links' ? OPDRACHTEN.find(x => x.stad === 'IJlst') : o === 'bocht-rechts' ? OPDRACHTEN.find(x => x.richting === 1) : OPDRACHTEN.find(x => x.id === o);
     zetWolk(o === 'splits' ? 'Welke kant? Stap!' : opd ? opd.aankondiging : o === 'finish' ? 'De finish komt eraan!' : 'Lekker tempo!');
@@ -1885,7 +2085,9 @@ function voorbeeld(t) {
   wereld.updateMatrixWorld(); wolk.position.copy(wereld.localToWorld(new THREE.Vector3(maatje.position.x, base.wolkY, -2.6))); wolk.lookAt(0, wolk.position.y, 0);
   if (balk.visible) { balk.position.copy(wolk.position); balk.position.y -= 0.27; balk.quaternion.copy(wolk.quaternion); }
   tekenBord('120 m', `opdracht 1/${OPDRACHTEN.length} · 9 km/u`);
-  if (!vbT || Math.floor(ts) !== Math.floor(ts - dt)) tekenVoortgang(0.42, 128);
+  if (!vbT || Math.floor(ts) !== Math.floor(ts - dt)) { tekenVoortgang(0.42, 128); tekenMeter(14.6, 412, 3, 8, 3); }
+  if (o === 'splits' && VB.has('wijs')) { if (!wijsVlak[0].visible) plaatsWijsVlakken({ x: 0, y: 1.67, z: 0 }); tekenWijsVlak(wijsVlak[0], 'Dokkum', 0, 0.6, ''); tekenWijsVlak(wijsVlak[1], 'Sneek', (ts % 1.2) / 1.2, 0.6, 'gekozen'); }
+  if (o === 'feest' && !feest) feest = maakFeest(11); if (feest) updateFeest(ts);
 }
 
 renderer.setAnimationLoop((t, frame) => {
@@ -1966,7 +2168,7 @@ startKnop.addEventListener('click', async () => {
     opdr = null; opdrIndex = 0; volgendeT = 0; reikAfst = null; kaartStaat = null; kaart.visible = false; bochtK = 0; bochtD0 = 0; zetBalk(null); resultaten = []; ritten = []; log = []; gebeurtenissen = []; tijd = 0; toonResultaten(); downloadKnop.hidden = true;
     kal = null; niveau = {}; reeks = {}; laadEtappe(+kiesEtappe.value);
     for (const c of [...wereld.children]) if (c.userData.vaantjeGroep) wereld.remove(c);
-    wisDorpen();
+    wisDorpen(); wisFeest();
     toonTijd = document.getElementById('optTijd').checked;
     lijfAan = document.getElementById('optLijf').checked; sneeuw.visible = document.getElementById('optSneeuw').checked; kruisje.visible = false; bochtS = 0;
     zetWolk('Sta even stil en kijk recht vooruit');
