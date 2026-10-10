@@ -28,7 +28,7 @@
 <main id="startkaart">
   <h1>Animal World <span class="accent">Kart</span></h1>
   <p><strong>Technische stuurtest · versie <span id="versie"></span></strong></p>
-  <p>Ga eerst goed op je stoel zitten en start daarna de test. Vergelijk twee manieren om met de Quest-controllers een denkbeeldig stuur vast te houden.</p>
+  <p>Ga goed op je stoel zitten, maak de kart passend en race daarna met stuurmethode A tegen een virtuele dierenkart.</p>
   <div class="veilig"><strong>Veilig zitten:</strong> gebruik een vaste stoel zonder wielen of draaifunctie. Houd rondom genoeg vrije ruimte en blijf tijdens de hele test zitten.</div>
   <h2>Hoe wil je gas geven?</h2>
   <div class="keuzes">
@@ -49,7 +49,7 @@
 <script type="module">
 import * as THREE from 'three';
 
-const VERSIE = '0.5';
+const VERSIE = '0.6';
 const APP = 'Animal World Kart stuurtest';
 const PARAMS = new URLSearchParams(location.search);
 const VOORBEELD = PARAMS.has('voorbeeld');
@@ -123,6 +123,17 @@ bochtGroep.add(bochtWeg,bochtRand,bochtStreep);
 const bochtMatrix=new THREE.Matrix4(),bochtPos=new THREE.Vector3(),bochtQuat=new THREE.Quaternion(),bochtScale=new THREE.Vector3(1,1,1),bochtEuler=new THREE.Euler();
 function zetRechteBaan(zichtbaar){weg.visible=zichtbaar;rechteRanden.forEach(x=>x.visible=zichtbaar);strepen.forEach(x=>x.visible=zichtbaar);rechteDecor.forEach(x=>x.visible=zichtbaar);bochtGroep.visible=!zichtbaar}
 
+// Start, finish en een eenvoudige virtuele konijnenkart voor de snelheidsrace.
+function maakBoog(tekst,kleur){const g=new THREE.Group();for(const x of [-2.25,2.25]){const p=new THREE.Mesh(new THREE.BoxGeometry(.11,1.5,.11),kleur);p.position.set(x,.75,0);g.add(p)}const balk=new THREE.Mesh(new THREE.BoxGeometry(4.6,.28,.12),kleur);balk.position.y=1.43;g.add(balk);const c=document.createElement('canvas');c.width=512;c.height=96;const cx=c.getContext('2d');cx.fillStyle='#152139';cx.fillRect(0,0,512,96);cx.fillStyle='#fff';cx.font='800 56px system-ui';cx.textAlign='center';cx.fillText(tekst,256,68);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;const bord=new THREE.Mesh(new THREE.PlaneGeometry(2.3,.43),new THREE.MeshBasicMaterial({map:t,transparent:true}));bord.position.set(0,1.43,.07);g.add(bord);g.visible=false;wereld.add(g);return g}
+const startBoog=maakBoog('START',MAT.blauw),finishBoog=maakBoog('FINISH',MAT.geel);
+const tegenstander=new THREE.Group();
+const tegenBody=afgerondeDoos(.72,.22,.95,.10,MAT.roze);tegenBody.position.set(0,.20,-.47);tegenstander.add(tegenBody);
+const tegenKop=new THREE.Mesh(new THREE.SphereGeometry(.22,16,12),MAT.wit);tegenKop.position.set(0,.65,-.08);tegenstander.add(tegenKop);
+for(const x of [-.10,.10]){const oor=new THREE.Mesh(new THREE.CapsuleGeometry(.05,.22,4,8),MAT.roze);oor.position.set(x,.93,-.08);oor.rotation.z=x<0?-.12:.12;tegenstander.add(oor)}
+const wielMat=new THREE.MeshLambertMaterial({color:0x161922});for(const x of [-.39,.39])for(const z of [-.29,.29]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.105,.105,.08,12),wielMat);w.rotation.z=Math.PI/2;w.position.set(x,.12,z);tegenstander.add(w)}
+tegenstander.visible=false;wereld.add(tegenstander);
+const RACE_AFSTAND=360;
+
 const gates=[];
 function maakPoort(i){
   const g=new THREE.Group(), kleur=i%2?MAT.roze:MAT.blauw;
@@ -147,7 +158,7 @@ function zetVoorbeeldStuur(hoek,voortgang=0,goed=false){doelWijzer.visible=true;
 // Canvas-HUD
 const hudCanvas=document.createElement('canvas');hudCanvas.width=1200;hudCanvas.height=650;const hctx=hudCanvas.getContext('2d');
 const hudTex=new THREE.CanvasTexture(hudCanvas);hudTex.colorSpace=THREE.SRGBColorSpace;
-const hud=new THREE.Mesh(new THREE.PlaneGeometry(.50,.271),new THREE.MeshBasicMaterial({map:hudTex,transparent:true,depthWrite:false}));hud.position.set(.38,1.20,-.50);cockpit.add(hud);
+const hud=new THREE.Mesh(new THREE.PlaneGeometry(.50,.271),new THREE.MeshBasicMaterial({map:hudTex,transparent:true,depthWrite:false}));hud.position.set(.38,1.27,-.50);hud.rotation.x=-.16;cockpit.add(hud);
 let laatsteHud='';
 function wrapTekst(ctx,tekst,x,y,max,regel){const woorden=tekst.split(' ');let zin='';const regels=[];for(const w of woorden){const test=zin?zin+' '+w:w;if(ctx.measureText(test).width>max&&zin){regels.push(zin);zin=w}else zin=test}if(zin)regels.push(zin);regels.forEach((r,i)=>ctx.fillText(r,x,y+i*regel));return regels.length}
 function tekenHud(titel,tekst,detail='',kleur='#43BFFD'){
@@ -158,11 +169,11 @@ let audio=null;
 function toon(freq=660,duur=.1){if(STIL||!audio)return;const o=audio.createOscillator(),g=audio.createGain(),t=audio.currentTime;o.frequency.value=freq;g.gain.setValueAtTime(.12,t);g.gain.exponentialRampToValueAtTime(.001,t+duur);o.connect(g).connect(audio.destination);o.start(t);o.stop(t+duur)}
 
 const state={
-  fase:'wachten',subfase:'',methode:null,methodeVolgorde:['A','B'],methodeIndex:0,run:0,tijd:0,faseTijd:0,gasmodus:'automatisch',
+  fase:'wachten',subfase:'',methode:null,methodeVolgorde:['A'],methodeIndex:0,run:0,tijd:0,faseTijd:0,gasmodus:'automatisch',
   stuurRuw:0,stuurGefilterd:0,doelHoek:0,kartX:0,snelheid:0,tracking:false,vorigeKnoppen:{},keuze:null,
   kalibratie:{neutralA:0,neutralRollL:0,neutralRollR:0,maxA:45*DEG,maxB:45*DEG,afstand:0,hoofdHoogte:1.55,stuurHoogte:1.13,stuurAfstand:.36,links:0,rechts:0},
   neutralSom:{a:0,l:0,r:0,afstand:0,diepte:0,hoogte:0,n:0},range:{minA:0,maxA:0,minB:0,maxB:0},samples:[],events:[],resultaten:{},target:{lijst:[],index:0,start:0,hold:0,errors:[],overshoot:0,reaction:null},
-  slalom:{start:0,missed:0,hit:0,errors:[],corrections:0,lastSign:0},bochten:{afstand:0,buitenTijd:0,maxAfwijking:0,afwijkingen:[]},validFrames:0,totalFrames:0,laatsteLog:-1,sessionId:crypto.randomUUID?.()||Math.random().toString(36).slice(2)
+  slalom:{start:0,missed:0,hit:0,errors:[],corrections:0,lastSign:0},bochten:{afstand:0,buitenTijd:0,maxAfwijking:0,afwijkingen:[]},race:{afstand:0,tegenstanderAfstand:0,buitenTijd:0,startTijd:0,plaats:2,tegenstanderKlaar:false},validFrames:0,totalFrames:0,laatsteLog:-1,sessionId:crypto.randomUUID?.()||Math.random().toString(36).slice(2)
 };
 let base={pos:new THREE.Vector3(),yaw:0,voor:new THREE.Vector3(0,0,-1),rechts:new THREE.Vector3(1,0,0),headY:1.55};
 let laatsteT=null,currentSession=null,selectPulse=false,laatsteViewerPos=null,laatsteViewerQuat=null;
@@ -212,7 +223,7 @@ function pasCockpitAfstand(afstand){
   const d=clamp(afstand||.36,.28,.55);state.kalibratie.stuurAfstand=d;stuur.position.z=-d;dashboard.position.z=-(d+.28);neus.position.z=-(d+.40);hud.position.z=-(d+.14);
 }
 function pasCockpitHoogte(hoogte){
-  const h=clamp(hoogte||base.headY-.40,base.headY-.58,base.headY-.22),lokaal=h-cockpit.position.y;state.kalibratie.hoofdHoogte=base.headY;state.kalibratie.stuurHoogte=h;stuur.position.y=lokaal;dashboard.position.y=lokaal-.11;hud.position.set(.38,lokaal+.09,hud.position.z);
+  const h=clamp(hoogte||base.headY-.40,base.headY-.58,base.headY-.22),lokaal=h-cockpit.position.y;state.kalibratie.hoofdHoogte=base.headY;state.kalibratie.stuurHoogte=h;stuur.position.y=lokaal;dashboard.position.y=lokaal-.11;hud.position.set(.38,lokaal+.16,hud.position.z);
 }
 
 function beginKalibratie(){
@@ -225,7 +236,7 @@ function voltooiBereik(){
   state.kalibratie.maxA=kies(state.range.minA,state.range.maxA);state.kalibratie.maxB=kies(state.range.minB,state.range.maxB);
   state.kalibratie.links=Math.min(state.range.minA,state.range.minB);state.kalibratie.rechts=Math.max(state.range.maxA,state.range.maxB);
   event('kalibratie-klaar',{afstand:+state.kalibratie.afstand.toFixed(3),stuurAfstand:+state.kalibratie.stuurAfstand.toFixed(3),hoofdHoogte:+state.kalibratie.hoofdHoogte.toFixed(3),stuurHoogte:+state.kalibratie.stuurHoogte.toFixed(3),maxA:+(state.kalibratie.maxA/DEG).toFixed(1),maxB:+(state.kalibratie.maxB/DEG).toFixed(1)});
-  state.methodeIndex=0;state.methode=state.methodeVolgorde[0];zetFase('methodeIntro');toon(880);
+  state.methodeIndex=0;state.methode='A';beginRaceIntro();toon(880);
 }
 function beginStil(){state.validFrames=state.totalFrames=0;state.resultaten[state.methode]={still:[],targets:[],slalom:null};zetFase('stil');}
 function beginTargets(){state.target={lijst:[-30,-15,0,15,30,30,15,0,-15,-30],index:0,start:state.tijd,hold:0,errors:[],overshoot:0,reaction:null};state.doelHoek=state.target.lijst[0]*DEG;zetFase('targets');zetVoorbeeldStuur(state.doelHoek,0,false);}
@@ -250,12 +261,16 @@ function voltooiMethode(){
 function beginBochten(){
   state.methode='A';state.kartX=0;state.snelheid=0;state.bochten={afstand:0,buitenTijd:0,maxAfwijking:0,afwijkingen:[]};baanGroep.position.x=0;gates.forEach(g=>g.visible=false);zetRechteBaan(false);zetFase('bochten');toon(1040)
 }
+function beginRaceIntro(){
+  state.methode='A';state.kartX=0;state.snelheid=0;state.race={afstand:0,tegenstanderAfstand:3.5,buitenTijd:0,startTijd:0,plaats:2,tegenstanderKlaar:false};baanGroep.position.x=0;gates.forEach(g=>g.visible=false);zetRechteBaan(false);startBoog.visible=finishBoog.visible=tegenstander.visible=true;tekenRaceWereld();zetFase('raceIntro');
+}
+function beginRace(){state.snelheid=0;state.race.startTijd=state.tijd;zetFase('aftellen');toon(720)}
 function beginVrij(){state.methode=technischBeste();state.kartX=0;state.snelheid=0;zetFase('vrij');toon(1040)}
 function technischBeste(){
   if(!state.resultaten.A?.summary||!state.resultaten.B?.summary)return 'A';
   const score=m=>{const s=state.resultaten[m].summary;return s.stabiliteitGraden+s.gemiddeldeFoutGraden+s.overshootGraden+s.gemistePoorten*2+(100-s.trackingPct)*.1};return score('A')<=score('B')?'A':'B';
 }
-function naarResultaat(){state.methode=null;state.snelheid=0;gates.forEach(g=>g.visible=false);zetRechteBaan(true);baanGroep.position.x=0;zetFase('resultaat');toon(1320,.18)}
+function naarResultaat(){state.methode=null;state.snelheid=0;gates.forEach(g=>g.visible=false);startBoog.visible=finishBoog.visible=tegenstander.visible=false;zetRechteBaan(true);baanGroep.position.x=0;zetFase('resultaat');toon(1320,.18)}
 
 function updateLog(m,raw){
   if(['resultaat','wachten'].includes(state.fase))return;
@@ -263,18 +278,24 @@ function updateLog(m,raw){
   if(state.samples.length<60000)state.samples.push([+state.tijd.toFixed(3),state.fase,state.methode||'',+raw.toFixed(4),+state.stuurGefilterd.toFixed(4),+state.doelHoek.toFixed(4),m.valid?1:0,+state.kartX.toFixed(3),+state.snelheid.toFixed(3),+m.leftTrigger.toFixed(2),+m.rightTrigger.toFixed(2)]);
 }
 
-function bochtAmplitude(){return state.faseTijd<15?.65:state.faseTijd<32?1:1.35}
+function bochtAmplitude(){return ['raceIntro','aftellen','race'].includes(state.fase)?1.45:state.faseTijd<15?.65:state.faseTijd<32?1:1.35}
 function bochtX(s,amp){return amp*Math.sin(s/11)}
 function bochtRichting(s,amp){return (bochtX(s+.25,amp)-bochtX(s-.25,amp))/.5}
-function tekenBochtenbaan(){
-  if(!bochtGroep.visible)return;const amp=bochtAmplitude(),basis=bochtX(state.bochten.afstand,amp),rest=state.bochten.afstand%BOCHT_AFSTAND;
+function tekenBochtenbaan(voortgang=state.bochten.afstand){
+  if(!bochtGroep.visible)return;const amp=bochtAmplitude(),basis=bochtX(voortgang,amp),rest=voortgang%BOCHT_AFSTAND;
   for(let i=0;i<BOCHT_SEGMENTEN;i++){
-    const vooruit=i*BOCHT_AFSTAND-rest+.8,s=state.bochten.afstand+vooruit,x=bochtX(s,amp)-basis-state.kartX,helling=bochtRichting(s,amp),yaw=-Math.atan2(helling,1),z=-vooruit;
+    const vooruit=i*BOCHT_AFSTAND-rest+.8,s=voortgang+vooruit,x=bochtX(s,amp)-basis-state.kartX,helling=bochtRichting(s,amp),yaw=-Math.atan2(helling,1),z=-vooruit;
     bochtEuler.set(0,yaw,0);bochtQuat.setFromEuler(bochtEuler);bochtPos.set(x,.012,z);bochtMatrix.compose(bochtPos,bochtQuat,bochtScale);bochtWeg.setMatrixAt(i,bochtMatrix);
     for(let kant=0;kant<2;kant++){const zijde=kant?1:-1;bochtPos.set(x+zijde*2.4*Math.cos(yaw),.032,z-zijde*2.4*Math.sin(yaw));bochtMatrix.compose(bochtPos,bochtQuat,bochtScale);bochtRand.setMatrixAt(i*2+kant,bochtMatrix)}
     bochtPos.set(x,.042,z);bochtMatrix.compose(bochtPos,bochtQuat,bochtScale);bochtStreep.setMatrixAt(i,bochtMatrix);
   }
   bochtWeg.instanceMatrix.needsUpdate=true;bochtRand.instanceMatrix.needsUpdate=true;bochtStreep.instanceMatrix.needsUpdate=true;
+}
+function plaatsRaceObject(object,afstand,baanPositie,lane=0){
+  const rel=afstand-baanPositie,amp=bochtAmplitude(),basis=bochtX(baanPositie,amp),x=bochtX(afstand,amp)-basis-state.kartX+lane,helling=bochtRichting(afstand,amp);object.position.set(x,0,-rel);object.rotation.y=-Math.atan2(helling,1);object.visible=rel>-4&&rel<80;
+}
+function tekenRaceWereld(){
+  const R=state.race;tekenBochtenbaan(R.afstand);plaatsRaceObject(startBoog,3,R.afstand);plaatsRaceObject(finishBoog,RACE_AFSTAND,R.afstand);plaatsRaceObject(tegenstander,Math.min(R.tegenstanderAfstand+3,RACE_AFSTAND),R.afstand,1.15);
 }
 
 function updateSpel(dt,input){
@@ -283,7 +304,7 @@ function updateSpel(dt,input){
   let raw=0;
   if(state.methode&&m.valid)raw=stuurUpdate(m,dt);else if(!state.methode){state.stuurRuw=0;state.stuurGefilterd*=Math.exp(-dt/.08);stuur.rotation.z*=Math.exp(-dt/.08)}
   updateLog(m,raw);
-  if(['kalibratie','stil','targets','slalom','bochten','vrij'].includes(state.fase)&&!m.valid){
+  if(['kalibratie','stil','targets','slalom','bochten','vrij','raceIntro','aftellen','race'].includes(state.fase)&&!m.valid){
     state.faseTijd=Math.max(0,state.faseTijd-dt);if(state.fase==='targets')state.target.start+=dt;
     state.stuurRuw=0;state.stuurGefilterd=0;state.snelheid=0;stuur.rotation.z=0;
     tekenHud('Test gepauzeerd','Houd beide controllers weer voor je','De test gaat automatisch verder zodra beide controllers zichtbaar zijn','#F6F01D');
@@ -299,6 +320,10 @@ function updateSpel(dt,input){
   }else if(state.fase==='kalibratie'&&state.subfase==='bereik'){
     const a=angleWrap(m.a-state.kalibratie.neutralA),b=(angleWrap(m.rollL-state.kalibratie.neutralRollL)+angleWrap(m.rollR-state.kalibratie.neutralRollR))/2;state.range.minA=Math.min(state.range.minA,a);state.range.maxA=Math.max(state.range.maxA,a);state.range.minB=Math.min(state.range.minB,b);state.range.maxB=Math.max(state.range.maxB,b);
     const ft=state.faseTijd,voorbeeld=ft<1?0:ft<2.5?-40*DEG:ft<3.5?0:ft<5?40*DEG:0;zetVoorbeeldStuur(voorbeeld,ft/6,false);tekenHud('Maak jouw kart passend','Doe de beweging van het blauwe voorbeeldstuur na',ft<3.5?'Eerst rustig naar links':'Nu rustig naar rechts');if(state.faseTijd>=6)voltooiBereik();
+  }else if(state.fase==='raceIntro'){
+    tekenRaceWereld();tekenHud('Klaar voor de race?','Versla de roze konijnenkart!','Methode A · rechter trigger = gas · linker trigger = rem · druk A om te starten');if(confirm||SIMULATIE)beginRace();
+  }else if(state.fase==='aftellen'){
+    tekenRaceWereld();const tel=state.faseTijd<1?'3':state.faseTijd<2?'2':state.faseTijd<3?'1':'START!';tekenHud('Startlijn',tel,'Houd het stuur recht en maak je klaar','#F6F01D');if(state.faseTijd>=3.35){state.race.startTijd=state.tijd;zetFase('race');toon(1100,.16)}
   }else if(state.fase==='methodeIntro'){
     const naam=state.methode==='A'?'A · Positiegestuurd':'B · Kantelgestuurd';tekenHud(naam,state.methode==='A'?'Draai de lijn tussen je handen als een stuur':'Kantel beide controllers mee met het stuur','Druk op A om deze test te starten');if(confirm||SIMULATIE)beginStil();
   }else if(state.fase==='stil'){
@@ -317,30 +342,34 @@ function updateSpel(dt,input){
     kartMarker.position.x=0;tekenBochtenbaan();const vooruit=bochtRichting(B.afstand+9,bochtAmplitude()),richting=Math.abs(vooruit)<.025?'Rechtuit':vooruit>0?'Bocht naar rechts':'Bocht naar links',rand=afwijking>2.15?' · terug naar het midden!':'';
     tekenHud('Bochtentraining',`${richting}${rand}`,`${state.gasmodus==='zelf'?'Rechter trigger = gas · ':''}snelheid ${(state.snelheid*3.6).toFixed(0)} km/u · nog ${Math.max(0,50-state.faseTijd).toFixed(0)} s`,afwijking>2.15?'#F6F01D':'#43BFFD');
     if(state.faseTijd>=50){state.resultaten.bochten={methode:'A',buitenBaanSeconden:+B.buitenTijd.toFixed(2),maxAfwijkingMeter:+B.maxAfwijking.toFixed(2),gemiddeldeAfwijkingMeter:+(B.afwijkingen.reduce((a,v)=>a+v,0)/Math.max(1,B.afwijkingen.length)).toFixed(2)};event('bochten-klaar',state.resultaten.bochten);zetRechteBaan(true);baanGroep.position.x=0;beginVrij()}
+  }else if(state.fase==='race'){
+    const R=state.race,gas=state.gasmodus==='automatisch'?1:m.rightTrigger,rem=m.leftTrigger;state.snelheid=clamp(state.snelheid+(gas*6-rem*16-.5-state.snelheid*.08)*dt,0,12.5);R.maxSnelheid=Math.max(R.maxSnelheid||0,state.snelheid);R.afstand+=state.snelheid*dt;
+    const helling=bochtRichting(R.afstand,bochtAmplitude());state.kartX=clamp(state.kartX+(state.stuurGefilterd*state.snelheid*.48-helling*state.snelheid*.82)*dt,-3,3);const buiten=Math.abs(state.kartX)>2.15;if(buiten){R.buitenTijd+=dt;state.kartX*=Math.exp(-dt*1.35);state.snelheid=Math.max(gas>.05?2.2:0,state.snelheid-6*dt)}
+    const verschil=R.afstand-R.tegenstanderAfstand,aiSnelheid=10.2+clamp(verschil*.07,-2.4,2)+.35*Math.sin(state.tijd*.42);if(R.tegenstanderAfstand<RACE_AFSTAND)R.tegenstanderAfstand=Math.min(RACE_AFSTAND,R.tegenstanderAfstand+aiSnelheid*dt);if(!R.tegenstanderKlaar&&R.tegenstanderAfstand>=RACE_AFSTAND){R.tegenstanderKlaar=true;R.tegenstanderFinishTijd=state.tijd-R.startTijd;toon(300,.14)}R.plaats=R.afstand>=R.tegenstanderAfstand?1:2;
+    kartMarker.position.x=0;tekenRaceWereld();const resterend=Math.max(0,RACE_AFSTAND-R.afstand),waarschuwing=buiten?'Automatisch terug naar de baan':'';tekenHud(`Positie ${R.plaats} van 2`,waarschuwing||`${Math.round(resterend)} meter tot de finish`,`Snelheid ${(state.snelheid*3.6).toFixed(0)} km/u · ${Math.round(100*R.afstand/RACE_AFSTAND)}%`,buiten?'#F6F01D':'#43BFFD');
+    if(R.afstand>=RACE_AFSTAND||state.faseTijd>=90){const klaar=R.afstand>=RACE_AFSTAND,plaats=klaar&&R.tegenstanderAfstand<RACE_AFSTAND?1:2;state.resultaten.race={methode:'A',plaats,tijdSeconden:+(state.tijd-R.startTijd).toFixed(2),afstandMeter:+Math.min(R.afstand,RACE_AFSTAND).toFixed(1),tegenstanderAfstandMeter:+R.tegenstanderAfstand.toFixed(1),topsnelheidKmh:+((R.maxSnelheid||0)*3.6).toFixed(1),buitenBaanSeconden:+R.buitenTijd.toFixed(2),finishGehaald:klaar};event('race-klaar',state.resultaten.race);naarResultaat()}
   }else if(state.fase==='vrij'){
     const gas=state.gasmodus==='automatisch'?1:m.rightTrigger,rem=m.leftTrigger;state.snelheid=clamp(state.snelheid+(gas*3.8-rem*12-1.1)*dt,0,7);state.kartX=clamp(state.kartX+state.stuurGefilterd*(.4+state.snelheid*.2)*dt,-2,2);kartMarker.position.x=state.kartX;baanGroep.position.x=-state.kartX;
     const rijTekst=state.gasmodus==='automatisch'?'Automatisch gas · linker trigger remt snel':state.snelheid<.15&&m.rightTrigger<.1?'Knijp de rechter trigger in om te vertrekken':'Rechter trigger geeft gas · linker trigger remt snel';tekenHud('Vrij rijden',rijTekst,`Methode ${state.methode} · gas ${Math.round(m.rightTrigger*100)}% · snelheid ${(state.snelheid*3.6).toFixed(0)} km/u · nog ${Math.max(0,30-state.faseTijd).toFixed(0)} s`);if(recal&&state.snelheid<.2)beginKalibratie();if(state.faseTijd>=30)naarResultaat();
   }else if(state.fase==='resultaat'){
-    const best=technischBeste();const gekozen=state.keuze?`Jouw keuze: ${state.keuze==='gelijk'?'geen verschil':'methode '+state.keuze}`:'A = methode A · B = methode B · X = geen verschil';tekenHud('Test voltooid',`Technisch resultaat: methode ${best}`,state.keuze?`${gekozen} · druk A om af te sluiten`:`Welke voelde natuurlijker? ${gekozen}`,'#F6F01D');
-    if(!state.keuze){if(knopNet('rightPrimaryChoice',m.buttons)||confirm)state.keuze='A';else if(knopNet('rightSecondary',m.buttons))state.keuze='B';else if(knopNet('leftPrimaryChoice',m.buttons)||recal)state.keuze='gelijk';if(state.keuze){event('voorkeur',{keuze:state.keuze});toon(1040)}}else if(confirm&&currentSession)currentSession.end();
+    const R=state.resultaten.race;if(R){tekenHud(R.plaats===1?'Jij wint!':'Finish!',`Plaats ${R.plaats} van 2 · ${(R.tijdSeconden).toFixed(1)} seconden`,`Topsnelheid ${R.topsnelheidKmh.toFixed(0)} km/u · druk A om af te sluiten`,'#F6F01D')}else tekenHud('Test voltooid','De rit is afgerond','Druk A om af te sluiten','#F6F01D');if(confirm&&currentSession)currentSession.end();
   }
   beweegWeg(dt);
 }
 
-function beweegWeg(dt){if(state.fase==='bochten')return;const speed=state.fase==='slalom'?5:state.fase==='vrij'?state.snelheid:1.2;for(const s of strepen){s.position.z+=speed*dt;if(s.position.z>3)s.position.z-=108}}
+function beweegWeg(dt){if(bochtGroep.visible)return;const speed=state.fase==='slalom'?5:state.fase==='vrij'?state.snelheid:1.2;for(const s of strepen){s.position.z+=speed*dt;if(s.position.z>3)s.position.z-=108}}
 
 function plaatsWereld(p,q){
   const f=new THREE.Vector3(0,0,-1).applyQuaternion(q);f.y=0;if(f.lengthSq()<.001)f.set(0,0,-1);f.normalize();const yaw=Math.atan2(-f.x,-f.z);base={pos:new THREE.Vector3(p.x,p.y,p.z),yaw,voor:f,rechts:new THREE.Vector3(-f.z,0,f.x),headY:p.y};state.kalibratie.hoofdHoogte=p.y;wereld.position.set(p.x,0,p.z);wereld.rotation.y=yaw;cockpit.position.y=p.y-1.55;hudGroep.position.y=p.y-1.55;doelWijzer.position.y=p.y-.12;wereld.updateMatrixWorld(true);
 }
 
 function resetTest(){
-  state.run++;state.fase='controllers';state.subfase='';state.methodeVolgorde=state.run%2===1?['A','B']:['B','A'];state.methode=null;state.methodeIndex=0;state.tijd=state.faseTijd=0;state.stuurRuw=state.stuurGefilterd=state.kartX=state.snelheid=0;state.samples=[];state.events=[];state.resultaten={};state.bochten={afstand:0,buitenTijd:0,maxAfwijking:0,afwijkingen:[]};state.keuze=null;state.vorigeKnoppen={};state.laatsteLog=-1;state.gasmodus=document.querySelector('input[name=gas]:checked').value;pasCockpitAfstand(.36);zetRechteBaan(true);baanGroep.position.x=0;gates.forEach(g=>g.visible=false);event('start',{gasmodus:state.gasmodus,volgorde:state.methodeVolgorde.join('-')});
+  state.run++;state.fase='controllers';state.subfase='';state.methodeVolgorde=['A'];state.methode=null;state.methodeIndex=0;state.tijd=state.faseTijd=0;state.stuurRuw=state.stuurGefilterd=state.kartX=state.snelheid=0;state.samples=[];state.events=[];state.resultaten={};state.bochten={afstand:0,buitenTijd:0,maxAfwijking:0,afwijkingen:[]};state.race={afstand:0,tegenstanderAfstand:0,buitenTijd:0,startTijd:0,plaats:2,tegenstanderKlaar:false,maxSnelheid:0};state.keuze=null;state.vorigeKnoppen={};state.laatsteLog=-1;state.gasmodus=document.querySelector('input[name=gas]:checked').value;pasCockpitAfstand(.36);zetRechteBaan(true);startBoog.visible=finishBoog.visible=tegenstander.visible=false;baanGroep.position.x=0;gates.forEach(g=>g.visible=false);event('start',{gasmodus:state.gasmodus,methode:'A'});
 }
 
-function resultaatData(){return {app:APP,versie:VERSIE,datum:new Date().toISOString(),sessionId:state.sessionId,userAgent:navigator.userAgent,instellingen:{gasmodus:state.gasmodus,methodeVolgorde:state.methodeVolgorde},kalibratie:{...state.kalibratie},resultaten:state.resultaten,technischBeste:technischBeste(),voorkeur:state.keuze,sampleVelden:['t','fase','methode','ruweHoekRad','gefilterdNorm','doelHoekRad','tracking','kartX','snelheid','rem','gas'],samples:state.samples,gebeurtenissen:state.events};}
+function resultaatData(){return {app:APP,versie:VERSIE,datum:new Date().toISOString(),sessionId:state.sessionId,userAgent:navigator.userAgent,instellingen:{gasmodus:state.gasmodus,stuurmethode:'A'},kalibratie:{...state.kalibratie},resultaten:state.resultaten,sampleVelden:['t','fase','methode','ruweHoekRad','gefilterdNorm','doelHoekRad','tracking','kartX','snelheid','rem','gas'],samples:state.samples,gebeurtenissen:state.events};}
 function toonHtmlResultaat(){
-  if(!state.resultaten.A?.summary||!state.resultaten.B?.summary)return;const a=state.resultaten.A.summary,b=state.resultaten.B.summary,best=technischBeste();
-  ui.samenvatting.innerHTML=`<p class="winnaar">Technisch beste methode: ${best}</p><table><thead><tr><th>Meting</th><th>A</th><th>B</th></tr></thead><tbody><tr><td>Stabiliteit</td><td>${a.stabiliteitGraden}°</td><td>${b.stabiliteitGraden}°</td></tr><tr><td>Gem. fout</td><td>${a.gemiddeldeFoutGraden}°</td><td>${b.gemiddeldeFoutGraden}°</td></tr><tr><td>Reactietijd</td><td>${a.reactietijd}s</td><td>${b.reactietijd}s</td></tr><tr><td>Gemiste poorten</td><td>${a.gemistePoorten}</td><td>${b.gemistePoorten}</td></tr><tr><td>Tracking</td><td>${a.trackingPct}%</td><td>${b.trackingPct}%</td></tr></tbody></table><p>Voorkeur: ${state.keuze==='gelijk'?'geen verschil':state.keuze?'methode '+state.keuze:'niet gekozen'}</p>`;ui.resultaten.style.display='block';
+  const r=state.resultaten.race;if(!r)return;ui.samenvatting.innerHTML=`<p class="winnaar">${r.plaats===1?'Gewonnen!':'Race voltooid'}</p><table><tbody><tr><td>Plaats</td><td>${r.plaats} van 2</td></tr><tr><td>Tijd</td><td>${r.tijdSeconden}s</td></tr><tr><td>Topsnelheid</td><td>${r.topsnelheidKmh} km/u</td></tr><tr><td>Tijd buiten de baan</td><td>${r.buitenBaanSeconden}s</td></tr><tr><td>Stuurmethode</td><td>A</td></tr></tbody></table>`;ui.resultaten.style.display='block';
 }
 function downloadJson(){const blob=new Blob([JSON.stringify(resultaatData(),null,2)],{type:'application/json'}),a=document.createElement('a'),d=new Date(),pad=n=>String(n).padStart(2,'0');a.href=URL.createObjectURL(blob);a.download=`animal-world-kart-stuurtest-${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 
@@ -358,25 +387,26 @@ function setupDesktop(){
   renderer.setClearColor(0x91cdec,1);renderer.domElement.style.display='block';ui.startkaart.style.display='none';ui.badge.style.display='block';camera.position.set(0,1.55,.55);camera.lookAt(0,1.28,-2.5);plaatsWereld(new THREE.Vector3(0,1.55,0),new THREE.Quaternion());
   resetTest();state.kalibratie={neutralA:0,neutralRollL:0,neutralRollR:0,maxA:45*DEG,maxB:45*DEG,afstand:.38,hoofdHoogte:1.55,stuurHoogte:1.13,stuurAfstand:.36,links:-45*DEG,rechts:45*DEG};state.fase=SIMULATIE?'controllers':'vrij';state.methode=SIMULATIE?null:state.methodeVolgorde[0];state.gasmodus=PARAMS.has('zelf')?'zelf':'automatisch';
   if(VOORBEELD&&PARAMS.has('bochten'))beginBochten();
+  if(VOORBEELD&&PARAMS.has('race'))beginRaceIntro();
   if(VOORBEELD&&PARAMS.has('doel')){state.fase='voorbeeldDoel';state.methode='A';stuur.rotation.z=-30*DEG;zetVoorbeeldStuur(30*DEG,.62,true);tekenHud('Doe het voorbeeld na','Goed zo, even vasthouden!','De groene lampjes laten zien hoe lang nog')}
   ui.badge.textContent=SIMULATIE?'Automatische simulatie':'Voorbeeld · pijltjestoetsen sturen';
 }
 const keys={};addEventListener('keydown',e=>keys[e.key]=true);addEventListener('keyup',e=>keys[e.key]=false);
 function desktopInput(){
-  if(SIMULATIE){let hoek=0;if(state.fase==='kalibratie'&&state.subfase==='bereik')hoek=Math.sin(state.tijd*2)*48*DEG;else if(state.fase==='targets')hoek=state.doelHoek;else if(state.fase==='slalom'){const next=gates.find(g=>g.visible&&!g.userData.passed);hoek=clamp(((next?.userData.x||0)-state.kartX)*.55,-1,1)*45*DEG}else if(state.fase==='bochten'){const helling=bochtRichting(state.bochten.afstand,bochtAmplitude());hoek=clamp(helling*1.7-state.kartX*.3,-1,1)*45*DEG}return {override:true,valid:true,positionAngle:hoek,tiltAngle:hoek,rightTrigger:.8,leftTrigger:0,buttons:{rightPrimary:state.fase==='methodeIntro'}}}
+  if(SIMULATIE){let hoek=0;if(state.fase==='kalibratie'&&state.subfase==='bereik')hoek=Math.sin(state.tijd*2)*48*DEG;else if(state.fase==='targets')hoek=state.doelHoek;else if(state.fase==='slalom'){const next=gates.find(g=>g.visible&&!g.userData.passed);hoek=clamp(((next?.userData.x||0)-state.kartX)*.55,-1,1)*45*DEG}else if(state.fase==='bochten'){const helling=bochtRichting(state.bochten.afstand,bochtAmplitude());hoek=clamp(helling*1.7-state.kartX*.3,-1,1)*45*DEG}else if(state.fase==='race'){const helling=bochtRichting(state.race.afstand,bochtAmplitude());hoek=clamp(helling*1.72-state.kartX*.32,-1,1)*45*DEG}return {override:true,valid:true,positionAngle:hoek,tiltAngle:hoek,rightTrigger:1,leftTrigger:0,buttons:{rightPrimary:['methodeIntro','raceIntro'].includes(state.fase)}}}
   const hoek=((keys.ArrowRight?1:0)-(keys.ArrowLeft?1:0))*38*DEG;return {override:true,valid:true,positionAngle:hoek,tiltAngle:hoek,rightTrigger:keys.ArrowUp?1:.6,leftTrigger:keys.ArrowDown?1:0,buttons:{}};
 }
 
 renderer.setAnimationLoop((t,frame)=>{
   let dt=laatsteT===null?0:Math.min((t-laatsteT)/1000,.1);laatsteT=t;
   if(frame){const ref=renderer.xr.getReferenceSpace(),pose=frame.getViewerPose(ref);if(pose){const tr=pose.transform,p=new THREE.Vector3(tr.position.x,tr.position.y,tr.position.z),q=new THREE.Quaternion(tr.orientation.x,tr.orientation.y,tr.orientation.z,tr.orientation.w);laatsteViewerPos=p;laatsteViewerQuat=q;if(state.tijd===0)plaatsWereld(p,q);updateSpel(dt,leesControllers(frame,ref))}}
-  else if(VOORBEELD||SIMULATIE){if(SIMULATIE)dt*=10;updateSpel(dt,desktopInput());if(state.fase==='controllers')beginKalibratie();if(SIMULATIE&&state.fase==='resultaat'&&!state.keuze){state.keuze=technischBeste();ui.badge.textContent=`Simulatie voltooid · beste methode ${technischBeste()}`}}
+  else if(VOORBEELD||SIMULATIE){if(SIMULATIE)dt*=10;updateSpel(dt,desktopInput());if(state.fase==='controllers')beginKalibratie();if(SIMULATIE&&state.fase==='resultaat')ui.badge.textContent='Simulatie voltooid · race gefinisht'}
   renderer.render(scene,camera);
 });
 
 window.animalWorldKartTest={
-  get fase(){return state.fase},get methode(){return state.methode},get kalibratie(){return state.kalibratie},get stuurRuw(){return state.stuurRuw},get stuurGefilterd(){return state.stuurGefilterd},get snelheid(){return state.snelheid},get resultaten(){return state.resultaten},
-  herkalibreer:beginKalibratie,startOnderdeel:()=>state.fase==='methodeIntro'&&beginStil(),updateMetTestposes:(poses,dt=.016)=>updateSpel(dt,{override:true,valid:true,...poses}),resultaatData
+  get fase(){return state.fase},get methode(){return state.methode},get kalibratie(){return state.kalibratie},get stuurRuw(){return state.stuurRuw},get stuurGefilterd(){return state.stuurGefilterd},get snelheid(){return state.snelheid},get kartX(){return state.kartX},get race(){return state.race},get resultaten(){return state.resultaten},
+  herkalibreer:beginKalibratie,startOnderdeel:()=>state.fase==='raceIntro'?beginRace():state.fase==='methodeIntro'&&beginStil(),updateMetTestposes:(poses,dt=.016)=>updateSpel(dt,{override:true,valid:true,...poses}),resultaatData
 };
 
 addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
