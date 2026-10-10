@@ -28,7 +28,7 @@
 <main id="startkaart">
   <h1>Animal World <span class="accent">Kart</span></h1>
   <p><strong>Technische stuurtest · versie <span id="versie"></span></strong></p>
-  <p>Vergelijk twee manieren om met de Quest-controllers een denkbeeldig stuur vast te houden. Na afloop zie je welke methode het nauwkeurigst werkte.</p>
+  <p>Ga eerst goed op je stoel zitten en start daarna de test. Vergelijk twee manieren om met de Quest-controllers een denkbeeldig stuur vast te houden.</p>
   <div class="veilig"><strong>Veilig zitten:</strong> gebruik een vaste stoel zonder wielen of draaifunctie. Houd rondom genoeg vrije ruimte en blijf tijdens de hele test zitten.</div>
   <h2>Hoe wil je gas geven?</h2>
   <div class="keuzes">
@@ -49,7 +49,7 @@
 <script type="module">
 import * as THREE from 'three';
 
-const VERSIE = '0.1';
+const VERSIE = '0.2';
 const APP = 'Animal World Kart stuurtest';
 const PARAMS = new URLSearchParams(location.search);
 const VOORBEELD = PARAMS.has('voorbeeld');
@@ -99,7 +99,7 @@ function afgerondeDoos(w,h,d,r,kleur){
 // Cockpit en virtueel stuur
 const neus=afgerondeDoos(1.35,.38,.55,.16,MAT.paars); neus.rotation.x=-Math.PI/2; neus.position.set(0,.63,-.45); cockpit.add(neus);
 const dashboard=afgerondeDoos(.92,.22,.12,.08,MAT.donker); dashboard.position.set(0,1.02,-.68); cockpit.add(dashboard);
-const stuur=new THREE.Group(); stuur.position.set(0,1.13,-.52); stuur.rotation.x=-.14; cockpit.add(stuur);
+const stuur=new THREE.Group(); stuur.position.set(0,1.13,-.72); stuur.rotation.x=-.14; cockpit.add(stuur);
 const stuurRing=new THREE.Mesh(new THREE.TorusGeometry(.255,.027,10,48),MAT.geel); stuur.add(stuurRing);
 const naaf=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.045,20),MAT.paars); naaf.rotation.x=Math.PI/2; stuur.add(naaf);
 for(const a of [0,Math.PI*2/3,Math.PI*4/3]){const spaak=new THREE.Mesh(new THREE.BoxGeometry(.19,.025,.025),MAT.geel);spaak.position.set(Math.cos(a)*.095,Math.sin(a)*.095,0);spaak.rotation.z=a;stuur.add(spaak)}
@@ -126,7 +126,7 @@ const doelWijzer=new THREE.Mesh(new THREE.TorusGeometry(.32,.035,10,40),MAT.geel
 // Canvas-HUD
 const hudCanvas=document.createElement('canvas');hudCanvas.width=1200;hudCanvas.height=650;const hctx=hudCanvas.getContext('2d');
 const hudTex=new THREE.CanvasTexture(hudCanvas);hudTex.colorSpace=THREE.SRGBColorSpace;
-const hud=new THREE.Mesh(new THREE.PlaneGeometry(1.08,.585),new THREE.MeshBasicMaterial({map:hudTex,transparent:true,depthWrite:false}));hud.position.set(0,1.75,-2.05);hudGroep.add(hud);
+const hud=new THREE.Mesh(new THREE.PlaneGeometry(1.08,.585),new THREE.MeshBasicMaterial({map:hudTex,transparent:true,depthWrite:false}));hud.position.set(0,1.60,-2.05);hudGroep.add(hud);
 let laatsteHud='';
 function wrapTekst(ctx,tekst,x,y,max,regel){const woorden=tekst.split(' ');let zin='';const regels=[];for(const w of woorden){const test=zin?zin+' '+w:w;if(ctx.measureText(test).width>max&&zin){regels.push(zin);zin=w}else zin=test}if(zin)regels.push(zin);regels.forEach((r,i)=>ctx.fillText(r,x,y+i*regel));return regels.length}
 function tekenHud(titel,tekst,detail='',kleur='#43BFFD'){
@@ -144,7 +144,7 @@ const state={
   slalom:{start:0,missed:0,hit:0,errors:[],corrections:0,lastSign:0},validFrames:0,totalFrames:0,laatsteLog:-1,sessionId:crypto.randomUUID?.()||Math.random().toString(36).slice(2)
 };
 let base={pos:new THREE.Vector3(),yaw:0,voor:new THREE.Vector3(0,0,-1),rechts:new THREE.Vector3(1,0,0),headY:1.55};
-let laatsteT=null,currentSession=null,selectPulse=false;
+let laatsteT=null,currentSession=null,selectPulse=false,laatsteViewerPos=null,laatsteViewerQuat=null;
 
 function event(type,extra={}){state.events.push({t:+state.tijd.toFixed(3),type,...extra})}
 function zetFase(fase,subfase=''){state.fase=fase;state.subfase=subfase;state.faseTijd=0;laatsteHud='';event('fase',{fase,subfase})}
@@ -189,6 +189,7 @@ function stuurUpdate(m,dt){
 function plaatsHanden(m){if(!m.valid||!m.lp){handenL.visible=handenR.visible=false;return}handenL.visible=handenR.visible=true;handenL.position.copy(m.lp);handenR.position.copy(m.rp)}
 
 function beginKalibratie(){
+  if(laatsteViewerPos&&laatsteViewerQuat)plaatsWereld(laatsteViewerPos,laatsteViewerQuat);
   state.methode=null;state.neutralSom={a:0,l:0,r:0,afstand:0,n:0};state.range={minA:0,maxA:0,minB:0,maxB:0};state.stuurGefilterd=0;zetFase('kalibratie','neutraal');toon(620);
 }
 function voltooiNeutraal(){const n=Math.max(1,state.neutralSom.n);state.kalibratie.neutralA=state.neutralSom.a/n;state.kalibratie.neutralRollL=state.neutralSom.l/n;state.kalibratie.neutralRollR=state.neutralSom.r/n;state.kalibratie.afstand=state.neutralSom.afstand/n;zetFase('kalibratie','bereik');toon(740)}
@@ -246,7 +247,7 @@ function updateSpel(dt,input){
   }
 
   if(state.fase==='controllers'){
-    tekenHud('Controllers zoeken',m.valid?'Beide controllers gevonden':'Houd beide controllers voor je vast',m.valid?`Afstand ${(m.afstand*100).toFixed(0)} cm · blijf recht vooruit kijken`:'Gebruik de linker- en rechter Quest-controller');
+    tekenHud('Controllers zoeken',m.valid?'Beide controllers gevonden':'Houd beide controllers voor je vast',m.valid?`Blijf zitten · afstand ${(m.afstand*100).toFixed(0)} cm · kijk recht vooruit`:'Blijf zitten en gebruik de linker- en rechter Quest-controller');
     if(m.valid&&m.afstand>=.2&&m.afstand<=.6){state.subfase=state.subfase||state.tijd;if(state.tijd-state.subfase>1)beginKalibratie()}else state.subfase='';
   }else if(state.fase==='kalibratie'&&state.subfase==='neutraal'){
     tekenHud('Stuur recht','Houd je handen één seconde rustig stil','Alsof je een echt stuur recht voor je vasthoudt');
@@ -279,7 +280,7 @@ function updateSpel(dt,input){
 function beweegWeg(dt){const speed=state.fase==='slalom'?5:state.fase==='vrij'?state.snelheid:1.2;for(const s of strepen){s.position.z+=speed*dt;if(s.position.z>3)s.position.z-=108}}
 
 function plaatsWereld(p,q){
-  const f=new THREE.Vector3(0,0,-1).applyQuaternion(q);f.y=0;if(f.lengthSq()<.001)f.set(0,0,-1);f.normalize();const yaw=Math.atan2(-f.x,-f.z);base={pos:new THREE.Vector3(p.x,p.y,p.z),yaw,voor:f,rechts:new THREE.Vector3(-f.z,0,f.x),headY:p.y};wereld.position.set(p.x,0,p.z);wereld.rotation.y=yaw;cockpit.position.y=Math.max(0,p.y-1.55);hudGroep.position.y=Math.max(0,p.y-1.55);wereld.updateMatrixWorld(true);
+  const f=new THREE.Vector3(0,0,-1).applyQuaternion(q);f.y=0;if(f.lengthSq()<.001)f.set(0,0,-1);f.normalize();const yaw=Math.atan2(-f.x,-f.z);base={pos:new THREE.Vector3(p.x,p.y,p.z),yaw,voor:f,rechts:new THREE.Vector3(-f.z,0,f.x),headY:p.y};wereld.position.set(p.x,0,p.z);wereld.rotation.y=yaw;cockpit.position.y=p.y-1.55;hudGroep.position.y=p.y-1.55;doelWijzer.position.y=p.y-.15;wereld.updateMatrixWorld(true);
 }
 
 function resetTest(){
@@ -316,7 +317,7 @@ function desktopInput(){
 
 renderer.setAnimationLoop((t,frame)=>{
   let dt=laatsteT===null?0:Math.min((t-laatsteT)/1000,.1);laatsteT=t;
-  if(frame){const ref=renderer.xr.getReferenceSpace(),pose=frame.getViewerPose(ref);if(pose){const tr=pose.transform,p=new THREE.Vector3(tr.position.x,tr.position.y,tr.position.z),q=new THREE.Quaternion(tr.orientation.x,tr.orientation.y,tr.orientation.z,tr.orientation.w);if(state.tijd===0)plaatsWereld(p,q);updateSpel(dt,leesControllers(frame,ref))}}
+  if(frame){const ref=renderer.xr.getReferenceSpace(),pose=frame.getViewerPose(ref);if(pose){const tr=pose.transform,p=new THREE.Vector3(tr.position.x,tr.position.y,tr.position.z),q=new THREE.Quaternion(tr.orientation.x,tr.orientation.y,tr.orientation.z,tr.orientation.w);laatsteViewerPos=p;laatsteViewerQuat=q;if(state.tijd===0)plaatsWereld(p,q);updateSpel(dt,leesControllers(frame,ref))}}
   else if(VOORBEELD||SIMULATIE){if(SIMULATIE)dt*=10;updateSpel(dt,desktopInput());if(state.fase==='controllers')beginKalibratie();if(SIMULATIE&&state.fase==='resultaat'&&!state.keuze){state.keuze=technischBeste();ui.badge.textContent=`Simulatie voltooid · beste methode ${technischBeste()}`}}
   renderer.render(scene,camera);
 });
