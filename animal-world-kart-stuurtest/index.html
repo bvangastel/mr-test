@@ -112,7 +112,7 @@ function afgerondeDoos(w,h,d,r,kleur){
 // Cockpit en virtueel stuur
 const neus=afgerondeDoos(1.35,.38,.55,.16,MAT.paars); neus.rotation.x=-Math.PI/2; neus.position.set(0,.63,-.80); cockpit.add(neus);
 const dashboard=afgerondeDoos(.92,.22,.12,.08,MAT.donker); dashboard.position.set(0,1.02,-.68); cockpit.add(dashboard);
-const stuur=new THREE.Group(); stuur.position.set(0,1.13,-.36); stuur.rotation.x=-.14; cockpit.add(stuur);
+const stuur=new THREE.Group(); stuur.position.set(0,1.08,-.36); stuur.rotation.x=-.14; stuur.scale.setScalar(.82); cockpit.add(stuur);
 const stuurRing=new THREE.Mesh(new THREE.TorusGeometry(.255,.027,10,48),MAT.geel); stuur.add(stuurRing);
 const naaf=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,.045,20),MAT.paars); naaf.rotation.x=Math.PI/2; stuur.add(naaf);
 for(const a of [0,Math.PI*2/3,Math.PI*4/3]){const spaak=new THREE.Mesh(new THREE.BoxGeometry(.19,.025,.025),MAT.geel);spaak.position.set(Math.cos(a)*.095,Math.sin(a)*.095,0);spaak.rotation.z=a;stuur.add(spaak)}
@@ -253,7 +253,7 @@ function pasCockpitAfstand(afstand){
   const d=clamp(afstand||.36,.28,.55);state.kalibratie.stuurAfstand=d;stuur.position.z=-d;dashboard.position.z=-(d+.28);neus.position.z=-(d+.40);hud.position.z=-(d+.14);
 }
 function pasCockpitHoogte(hoogte){
-  const h=clamp(hoogte||base.headY-.40,base.headY-.58,base.headY-.22),lokaal=h-cockpit.position.y;state.kalibratie.hoofdHoogte=base.headY;state.kalibratie.stuurHoogte=h;stuur.position.y=lokaal;dashboard.position.y=lokaal-.11;hud.position.set(.34,lokaal+.16,hud.position.z);
+  const h=clamp(hoogte||base.headY-.40,base.headY-.58,base.headY-.22),lokaal=h-cockpit.position.y;state.kalibratie.hoofdHoogte=base.headY;state.kalibratie.stuurHoogte=h;stuur.position.y=lokaal-.05;dashboard.position.y=lokaal-.11;hud.position.set(.34,lokaal+.16,hud.position.z);
 }
 
 function beginKalibratie(){
