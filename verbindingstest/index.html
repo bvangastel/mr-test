@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iXbattle – verbindingstest</title>
+<style>
+  :root{--paars:#662A88;--blauw:#43BFFD;--roze:#EB69BB;--geel:#F6F01D;--bg:#100c1c;--kaart:#1e1830;--tekst:#f2eef8;--zacht:#b9aecb}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--tekst);display:flex;min-height:100vh;justify-content:center;padding:24px 16px}
+  .kaart{max-width:640px;width:100%}
+  h1{font-size:1.8rem;margin:0 0 .3rem} h1 span{color:var(--blauw)}
+  p,li{line-height:1.5;color:var(--zacht)} ol{padding-left:1.3rem}
+  .vak{background:var(--kaart);border-radius:14px;padding:12px 14px;margin:1rem 0}
+  .vak b{color:var(--tekst)}
+  input[type=text]{font:inherit;font-size:1.6rem;letter-spacing:.3em;text-transform:uppercase;width:8.5em;padding:.35rem .6rem;border-radius:10px;background:#2b2342;color:var(--tekst);border:1px solid #4a3d63}
+  button{font:inherit;cursor:pointer;border:0;border-radius:12px}
+  .groot{font-size:1.3rem;padding:.8rem 1.8rem;background:var(--paars);color:#fff;border-bottom:4px solid var(--blauw);margin:.4rem .4rem 0 0}
+  .groot:disabled{background:#4a4f57;border-color:#4a4f57;cursor:default}
+  .klein{font-size:.95rem;padding:.45rem 1rem;background:#2b2342;color:var(--tekst);margin:.4rem .4rem 0 0}
+  #status{font-size:1.15rem;color:var(--geel);min-height:1.4em;margin-top:.6rem}
+  .stats{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin-top:.6rem}
+  .stats div:nth-child(odd){color:var(--zacht)}
+  .ok{color:#5ee08a}.nee{color:#ff6b6b}
+  #versie{margin-top:1.4rem;font-size:.8rem;color:#6f6585}
+  [hidden]{display:none!important}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="kaart">
+  <h1>iXbattle <span>MR</span> – verbindingstest</h1>
+  <p>Test of twee apparaten elkaar kunnen vinden en hoe snel berichten heen en weer gaan. Dit is de basis voor het 1-tegen-1-spel.</p>
+  <div class="vak">
+    <b>Zo werkt het</b>
+    <ol>
+      <li>Open deze pagina op twee apparaten (twee Quests, of eerst een Quest en een laptop of telefoon).</li>
+      <li>Typ op beide <b>dezelfde kamercode</b> (of laat er één maken en neem die over) en druk op <b>Verbinden</b>. Wie het eerst verbindt is speler A (blauw), de ander speler B (roze).</li>
+      <li>Zie je "Verbonden", dan zie je hieronder de <b>ping</b> (heen en terug in milliseconden) en het verbindingstype.</li>
+      <li>Op de Quest: druk op <b>Start MR</b>. Sta even stil en kijk recht vooruit. Je tegenstander verschijnt op 3 m voor je als hoofd met handen en beweegt live mee.</li>
+      <li><b>Testworp:</b> knijp (duim en wijsvinger) en er vliegt een rotsblok vanuit je hand naar de ander. Die kan wegduiken; zijn headset bepaalt of hij geraakt is.</li>
+      <li>Klaar? Download het meetbestand en stuur het op.</li>
+    </ol>
+  </div>
+  <div class="vak">
+    <label for="code"><b>Kamercode</b></label><br>
+    <input type="text" id="code" maxlength="6" autocomplete="off" spellcheck="false">
+    <button class="klein" id="nieuweCode">Nieuwe code</button><br>
+    <button class="groot" id="verbind">Verbinden</button>
+    <button class="groot" id="startMR" disabled>Start MR</button>
+    <div id="status">Nog niet verbonden</div>
+    <div class="stats">
+      <div>Rol</div><div id="sRol">–</div>
+      <div>Ping</div><div id="sPing">–</div>
+      <div>Verbindingstype</div><div id="sType">–</div>
+      <div>Bewegingsberichten</div><div id="sPose">–</div>
+      <div>Testworpen</div><div id="sWorp">–</div>
+    </div>
+  </div>
+  <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
+  <div id="versie"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+const VERSIE = '0.1';
+document.getElementById('versie').textContent = 'verbindingstest versie ' + VERSIE;
+const VB = new URLSearchParams(location.search);
+const $ = id => document.getElementById(id);
+const AFSTAND = +(VB.get('afstand') || 3);   // tegenstander staat zo ver voor je (m)
+const K = { blauw: 0x43BFFD, roze: 0xEB69BB, paars: 0x662A88, geel: 0xF6F01D };
+
+// ---------- Meetgegevens ----------
+const meet = { pings: [], poseGaten: [], worpen: [], gebeurtenissen: [] };
+let t0 = performance.now();
+const nu = () => (performance.now() - t0) / 1000;
+function gebeurtenis(type, extra = {}) { meet.gebeurtenissen.push({ t: +nu().toFixed(2), type, ...extra }); }
+
+// ---------- Verbinding (PeerJS, of 'lokaal' via BroadcastChannel om te testen) ----------
+// Bericht-soorten: hallo, ping, pong, pose, worp, uitslag
+let rol = null, conn = null, peer = null, verbonden = false, verbType = '–';
+const PREFIX = 'ixbattle-vt-';
+function setStatus(t, kleur) { $('status').textContent = t; $('status').style.color = kleur || '#F6F01D'; }
+function stuur(bericht) { if (conn && verbonden) { try { conn.send(bericht); } catch (e) { gebeurtenis('stuurfout', { fout: e.message }); } } }
+function bijVerbonden(c) {
+  conn = c; verbonden = true; setStatus('Verbonden ✓', '#5ee08a'); $('startMR').disabled = !xrOk;
+  $('sRol').textContent = rol === 'A' ? 'speler A (blauw)' : 'speler B (roze)';
+  gebeurtenis('verbonden', { rol });
+  stuur({ t: 'hallo', rol, versie: VERSIE });
+  setTimeout(meetType, 2500);
+}
+function bijVerbroken(reden) {
+  if (!verbonden && !conn) return;
+  verbonden = false; conn = null; setStatus('Verbinding verbroken' + (reden ? ': ' + reden : '') + '. Herlaad de pagina om opnieuw te verbinden', '#ff6b6b');
+  gebeurtenis('verbroken', { reden: reden || '' });
+}
+function ontvang(d) {
+  if (!d || typeof d !== 'object') return;
+  if (d.t === 'ping') stuur({ t: 'pong', s: d.s });
+  else if (d.t === 'pong') { const rtt = performance.now() - d.s; meet.pings.push([+nu().toFixed(2), +rtt.toFixed(1)]); toonStats(); }
+  else if (d.t === 'pose') ontvangPose(d);
+  else if (d.t === 'worp') ontvangWorp(d);
+  else if (d.t === 'uitslag') ontvangUitslag(d);
+  else if (d.t === 'hallo') gebeurtenis('hallo', { van: d.rol, versie: d.versie });
+}
+function koppel(c) {
+  c.on('open', () => bijVerbonden(c));
+  c.on('data', ontvang);
+  c.on('close', () => bijVerbroken('de ander is weg'));
+  c.on('error', e => bijVerbroken(e && e.message));
+}
+function verbindPeer(code) {
+  const ice = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+  setStatus('Zoeken…');
+  // eerst proberen speler A te worden (de 'gastheer' van de kamer); bestaat die al, dan worden we speler B
+  peer = new Peer(PREFIX + code + '-a', { config: ice, debug: 1 });
+  peer.on('open', () => { rol = 'A'; setStatus(`Kamer ${code} geopend. Wacht op speler B…`); gebeurtenis('kamer-open', { code }); });
+  peer.on('connection', c => { if (conn) { c.close(); return; } c.on('open', () => {}); koppel(c); });
+  peer.on('disconnected', () => { if (!verbonden) setStatus('Contact met de koppelserver kwijt, opnieuw…'); try { peer.reconnect(); } catch (e) {} });
+  peer.on('error', e => {
+    if (e.type === 'unavailable-id' && !rol) {   // kamer bestaat al: wij zijn speler B
+      peer.destroy();
+      peer = new Peer(undefined, { config: ice, debug: 1 });
+      peer.on('open', () => { rol = 'B'; setStatus('Kamer gevonden, verbinden…'); koppel(peer.connect(PREFIX + code + '-a', { serialization: 'json', reliable: true })); });
+      peer.on('error', e2 => { setStatus('Fout: ' + (e2.type || e2.message), '#ff6b6b'); gebeurtenis('fout', { type: e2.type, fout: e2.message }); });
+      return;
+    }
+    setStatus('Fout: ' + (e.type || e.message), '#ff6b6b'); gebeurtenis('fout', { type: e.type, fout: e.message });
+  });
+}
+function verbindLokaal(code) {   // alleen voor testen: twee tabbladen in dezelfde browser
+  const kanaal = new BroadcastChannel(PREFIX + code), mijnId = Math.random().toString(36).slice(2);
+  const handlers = {};
+  const c = { send: m => kanaal.postMessage({ van: mijnId, m }), on: (n, f) => { handlers[n] = f; }, close: () => kanaal.close() };
+  let ander = null;
+  kanaal.onmessage = e => {
+    const { van, m, zoek, ja } = e.data;
+    if (van === mijnId) return;
+    if (zoek && !ander && rol === 'A') { ander = van; kanaal.postMessage({ van: mijnId, ja: van }); handlers.open && handlers.open(); return; }
+    if (ja === mijnId && !ander) { ander = van; rol = 'B'; handlers.open && handlers.open(); return; }
+    if (m && van === ander) handlers.data && handlers.data(m);
+  };
+  koppel(c);
+  kanaal.postMessage({ van: mijnId, zoek: true });
+  setTimeout(() => { if (!ander) { rol = 'A'; setStatus(`Kamer ${code} geopend (lokaal). Wacht op speler B…`); } }, 300);
+}
+async function meetType() {   // direct of via een doorgeefserver (relay)?
+  try {
+    const pc = conn && conn.peerConnection; if (!pc) { verbType = VB.get('transport') === 'lokaal' ? 'lokaal (test)' : 'onbekend'; toonStats(); return; }
+    const st = await pc.getStats(); let paar = null; const cands = {};
+    st.forEach(r => { if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded') paar = r; if (r.type === 'local-candidate' || r.type === 'remote-candidate') cands[r.id] = r; });
+    if (paar) { const l = cands[paar.localCandidateId], r = cands[paar.remoteCandidateId]; verbType = (l && r) ? `${l.candidateType} ↔ ${r.candidateType}${l.candidateType === 'relay' || r.candidateType === 'relay' ? ' (via relay)' : ' (direct)'}` : 'direct'; }
+    else verbType = 'onbekend';
+  } catch (e) { verbType = 'onbekend'; }
+  gebeurtenis('verbindingstype', { type: verbType }); toonStats();
+}
+setInterval(() => { if (verbonden) stuur({ t: 'ping', s: performance.now() }); }, 1000);
+let poseOntvangen = 0, poseLaatst = null, poseTeller = [];
+function toonStats() {
+  const p = meet.pings.slice(-20).map(x => x[1]);
+  if (p.length) { const gem = p.reduce((a, b) => a + b, 0) / p.length; $('sPing').innerHTML = `<b class="${gem < 120 ? 'ok' : 'nee'}">${Math.round(p.at(-1))} ms</b> (gemiddeld ${Math.round(gem)} ms, max ${Math.round(Math.max(...p))} ms)`; }
+  $('sType').textContent = verbType;
+  const n = poseTeller.filter(t => nu() - t < 2).length / 2;
+  $('sPose').textContent = poseOntvangen ? `${poseOntvangen} ontvangen · ${n.toFixed(0)} per seconde · grootste gat ${meet.poseGaten.length ? Math.round(Math.max(...meet.poseGaten.slice(-200))) : 0} ms` : '–';
+  const w = meet.worpen;
+  $('sWorp').textContent = w.length ? `${w.filter(x => x.soort === 'gegooid').length} gegooid (${w.filter(x => x.soort === 'gegooid' && x.geraakt).length} raak) · ${w.filter(x => x.soort === 'ontvangen').length} ontvangen (${w.filter(x => x.soort === 'ontvangen' && x.geraakt).length} keer geraakt)` : '–';
+  $('download').hidden = !meet.pings.length;
+}
+setInterval(toonStats, 1000);
+
+// ---------- Pagina ----------
+const maakCode = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random() * 24)]).join('');
+$('code').value = VB.get('code') || maakCode();
+$('nieuweCode').onclick = () => { $('code').value = maakCode(); };
+$('verbind').onclick = () => {
+  const code = $('code').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length < 3) { setStatus('Kies een code van minstens 3 tekens', '#ff6b6b'); return; }
+  $('verbind').disabled = true; $('code').disabled = true; $('nieuweCode').disabled = true;
+  t0 = performance.now(); gebeurtenis('start', { code, transport: VB.get('transport') || 'peerjs' });
+  if (VB.get('transport') === 'lokaal') verbindLokaal(code);
+  else if (typeof Peer === 'undefined') setStatus('PeerJS kon niet geladen worden (geen internet?)', '#ff6b6b');
+  else verbindPeer(code);
+};
+$('download').onclick = () => {
+  const d = new Date(), z = x => String(x).padStart(2, '0');
+  const data = { app: 'iXbattle verbindingstest', versie: VERSIE, datum: d.toISOString(), rol, verbindingstype: verbType, ua: navigator.userAgent, ...meet };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  a.download = `ixbattle-verbinding-${rol || 'x'}-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+};
+let xrOk = false;
+if ('xr' in navigator) navigator.xr.isSessionSupported('immersive-ar').then(ok => { xrOk = ok; if (!ok) $('startMR').title = 'Alleen op de Quest'; $('startMR').disabled = !(ok && verbonden); }).catch(() => {});
+
+// ---------- 3D-scène ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio); renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x000000, 0); renderer.xr.enabled = true; renderer.xr.setReferenceSpaceType('local-floor');
+renderer.domElement.style.display = 'none'; document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(70, 1, 0.01, 50);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 2.2));
+const wereld = new THREE.Group(); wereld.visible = false; scene.add(wereld);
+function tekenVlak(w, h, bw, bh) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.renderOrder = 10; m.userData = { ctx: c.getContext('2d'), tex }; return m;
+}
+// tegenstander: hoofd met vizier, twee handen, ring op de vloer, naambordje
+const kleurAnder = () => rol === 'A' ? K.roze : K.blauw;
+const ander = new THREE.Group(); wereld.add(ander); ander.visible = false;
+const anderMat = new THREE.MeshLambertMaterial({ color: K.roze });
+const kop = new THREE.Group(); ander.add(kop);
+const kopBol = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 14), anderMat); kopBol.scale.set(1, 1.15, 1.05); kop.add(kopBol);
+const vizier = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.08, 0.06), new THREE.MeshLambertMaterial({ color: 0x1b1f3b })); vizier.position.set(0, 0.01, 0.1); kop.add(vizier);
+const romp = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.45, 4, 12), new THREE.MeshLambertMaterial({ color: 0x8a7da3, transparent: true, opacity: 0.45 })); ander.add(romp);
+const handen = { left: new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), anderMat), right: new THREE.Mesh(new THREE.SphereGeometry(0.045, 14, 10), anderMat) };
+ander.add(handen.left, handen.right);
+const vloerRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.34, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: K.roze, transparent: true, opacity: 0.7 }));
+vloerRing.position.set(0, 0.01, -AFSTAND); wereld.add(vloerRing);
+const eigenRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.34, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: K.blauw, transparent: true, opacity: 0.7 }));
+eigenRing.position.y = 0.01; wereld.add(eigenRing);
+const paneel = tekenVlak(1024, 360, 0.9, 0.316); wereld.add(paneel);
+function tekenPaneel(tekst2) {
+  const c = paneel.userData.ctx; c.clearRect(0, 0, 1024, 360);
+  c.fillStyle = 'rgba(22,14,44,0.85)'; c.beginPath(); c.roundRect(6, 6, 1012, 348, 40); c.fill(); c.strokeStyle = verbonden ? '#5ee08a' : '#ff6b6b'; c.lineWidth = 8; c.stroke();
+  c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillStyle = '#ffffff'; c.font = 'bold 64px system-ui, sans-serif';
+  const p = meet.pings.slice(-5).map(x => x[1]), ping = p.length ? Math.round(p.reduce((a, b) => a + b, 0) / p.length) : null;
+  c.fillText(verbonden ? `Verbonden · ping ${ping ?? '–'} ms` : 'Niet verbonden', 512, 80);
+  c.font = '44px system-ui, sans-serif'; c.fillStyle = '#b9aecb';
+  c.fillText(`${rol === 'A' ? 'Jij bent A (blauw)' : 'Jij bent B (roze)'} · ${verbType}`, 512, 160);
+  c.fillStyle = '#F6F01D'; c.font = 'bold 50px system-ui, sans-serif';
+  c.fillText(tekst2 || 'Knijp om een rotsblok te gooien', 512, 260);
+  paneel.userData.tex.needsUpdate = true;
+}
+let paneelTekst = null, paneelTekstT = 0;
+// rotsblokken
+const steenGeo = new THREE.IcosahedronGeometry(0.1, 1);
+const steenMat = new THREE.MeshLambertMaterial({ color: 0x8a3020, emissive: 0xff2a00, emissiveIntensity: 0.4 });
+const vliegers = [];   // { mesh, van, naar, duur, t, soort: 'uit'|'in', id }
+
+// ---------- Opstellen en anker ----------
+let base = null, stilT = 0, ankerP = null, fase = 'uit', vorigeT = null;
+function zetBase(p, q) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; if (f.lengthSq() < 1e-4) f.set(0, 0, -1); f.normalize();
+  base = { y: p.y };
+  wereld.position.set(p.x, 0, p.z); wereld.rotation.y = Math.atan2(-f.x, -f.z); wereld.visible = true; wereld.updateMatrixWorld(true);
+  paneel.position.set(0.9, Math.max(1.0, p.y - 0.25), -1.6); paneel.lookAt(wereld.localToWorld(new THREE.Vector3(0, p.y, 0)));
+  gebeurtenis('opgesteld', { y: +p.y.toFixed(3) });
+}
+// eigen pose in lokale coördinaten (t.o.v. je anker)
+let mijnKop = new THREE.Vector3(), mijnKopQ = new THREE.Quaternion(), mijnHanden = {};
+const _q = new THREE.Quaternion();
+// tegenstander ontvangen: zijn lokale coördinaten 180° draaien en op AFSTAND voor mij zetten
+// (zijn vooruit = naar mij toe; zijn rechterhand zie ik aan mijn linkerkant)
+const spiegel = a => new THREE.Vector3(-a[0], a[1], -AFSTAND - a[2]);
+const draaiOm = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+let anderDoel = null, anderLaatst = 0;
+function ontvangPose(d) {
+  const t = performance.now();
+  if (poseLaatst !== null) meet.poseGaten.push(+(t - poseLaatst).toFixed(1));
+  poseLaatst = t; poseOntvangen++; poseTeller.push(nu()); if (poseTeller.length > 200) poseTeller.shift();
+  anderDoel = { kop: spiegel(d.k), q: new THREE.Quaternion(d.q[0], d.q[1], d.q[2], d.q[3]).premultiply(draaiOm), l: d.l ? spiegel(d.l) : null, r: d.r ? spiegel(d.r) : null };
+  anderLaatst = t;
+}
+function updateAnder(dt) {
+  if (!anderDoel) { ander.visible = false; return; }
+  const k = Math.min(1, dt * 15), oud = performance.now() - anderLaatst > 1500;
+  ander.visible = true; anderMat.color.setHex(kleurAnder()); vloerRing.material.color.setHex(kleurAnder()); eigenRing.material.color.setHex(rol === 'A' ? K.blauw : K.roze);
+  anderMat.transparent = oud; anderMat.opacity = oud ? 0.35 : 1;
+  kop.position.lerp(anderDoel.kop, k); kop.quaternion.slerp(anderDoel.q, k);
+  romp.position.set(kop.position.x, Math.max(0.4, kop.position.y - 0.55), kop.position.z);
+  for (const s of ['l', 'r']) { const h = handen[s === 'l' ? 'left' : 'right'], v = anderDoel[s]; h.visible = !!v; if (v) h.position.lerp(v, k); }
+}
+// ---------- Worpen ----------
+let worpNr = 0;
+function gooi() {
+  if (!verbonden || !base) return;
+  const van = (mijnHanden.r || mijnHanden.l || mijnKop.clone().add(new THREE.Vector3(0.2, -0.3, -0.3))).clone();
+  const id = `${rol}${++worpNr}`, duur = 1.6;
+  stuur({ t: 'worp', id, van: van.toArray().map(v => +v.toFixed(3)), duur });
+  // bij mij: vlieg naar het hoofd van de tegenstander zoals ik hem nu zie
+  const naar = ander.visible ? kop.position.clone() : new THREE.Vector3(0, 1.6, -AFSTAND);
+  const mesh = new THREE.Mesh(steenGeo, steenMat); mesh.position.copy(van); wereld.add(mesh);
+  vliegers.push({ mesh, van, naar: naar.clone().add(naar.clone().sub(van).normalize().multiplyScalar(1.5)), duur: duur * 1.4, t: 0, soort: 'uit', id });
+  meet.worpen.push({ t: +nu().toFixed(2), soort: 'gegooid', id, verstuurd: performance.now() });
+  gebeurtenis('worp-uit', { id });
+}
+function ontvangWorp(d) {
+  if (!base) { stuur({ t: 'uitslag', id: d.id, geraakt: false, reden: 'niet in MR' }); return; }
+  const van = spiegel(d.van), naar = mijnKop.clone();   // mikt op waar mijn hoofd nu is
+  const mesh = new THREE.Mesh(steenGeo, steenMat); mesh.position.copy(van); wereld.add(mesh);
+  vliegers.push({ mesh, van, naar, duur: d.duur, t: 0, soort: 'in', id: d.id, v: naar.clone().sub(van).divideScalar(d.duur) });
+  gebeurtenis('worp-in', { id: d.id });
+}
+function ontvangUitslag(d) {
+  const w = meet.worpen.find(x => x.id === d.id && x.soort === 'gegooid');
+  if (w) { w.geraakt = d.geraakt; w.uitslagNa = +(performance.now() - w.verstuurd).toFixed(0); delete w.verstuurd; }
+  paneelTekst = d.geraakt ? 'Raak! 🎯' : 'Ontweken…'; paneelTekstT = nu(); tekenPaneel(paneelTekst);
+  gebeurtenis('uitslag-ontvangen', { id: d.id, geraakt: d.geraakt });
+}
+function updateVliegers(dt) {
+  for (let i = vliegers.length - 1; i >= 0; i--) {
+    const w = vliegers[i]; w.t += dt;
+    const f = w.t / w.duur;
+    if (w.soort === 'uit') { w.mesh.position.lerpVectors(w.van, w.naar, f); if (f >= 1) { wereld.remove(w.mesh); vliegers.splice(i, 1); } continue; }
+    w.mesh.position.copy(w.van).addScaledVector(w.v, w.t); w.mesh.rotation.x += dt * 4; w.mesh.rotation.y += dt * 3;
+    if (f >= 1 && !w.klaar) {
+      w.klaar = true;
+      const d = Math.hypot(w.mesh.position.x - mijnKop.x, w.mesh.position.y - mijnKop.y);
+      const geraakt = d < 0.22;
+      stuur({ t: 'uitslag', id: w.id, geraakt, afstand: +d.toFixed(3) });
+      meet.worpen.push({ t: +nu().toFixed(2), soort: 'ontvangen', id: w.id, geraakt, afstand: +d.toFixed(3) });
+      paneelTekst = geraakt ? 'Au, geraakt!' : 'Ontweken! 👍'; paneelTekstT = nu(); tekenPaneel(paneelTekst);
+      if (geraakt) { wereld.remove(w.mesh); vliegers.splice(i, 1); }
+    }
+    if (w.t > w.duur + 0.8) { wereld.remove(w.mesh); vliegers.splice(i, 1); }
+  }
+}
+// ---------- Hoofdlus ----------
+let poseT = 0;
+function update(p, q, handW, dt) {
+  const hp = new THREE.Vector3(p.x, p.y, p.z);
+  if (!base) {
+    if (ankerP && hp.distanceTo(ankerP) < 0.015) stilT += dt; else { stilT = 0; ankerP = hp.clone(); }
+    if (stilT > 1) zetBase(p, q); else return;
+  }
+  wereld.updateMatrixWorld();
+  mijnKop = wereld.worldToLocal(hp.clone());
+  wereld.getWorldQuaternion(_q); mijnKopQ = _q.clone().invert().multiply(q);
+  mijnHanden = {}; for (const k in handW) mijnHanden[k === 'left' ? 'l' : 'r'] = wereld.worldToLocal(handW[k].clone());
+  poseT += dt;
+  if (poseT >= 0.05 && verbonden) {   // 20 keer per seconde
+    poseT = 0;
+    const r3 = v => v ? v.toArray().map(x => +x.toFixed(3)) : null;
+    stuur({ t: 'pose', k: r3(mijnKop), q: mijnKopQ.toArray().map(x => +x.toFixed(3)), l: r3(mijnHanden.l), r: r3(mijnHanden.r) });
+  }
+  updateAnder(dt); updateVliegers(dt);
+  if (Math.floor(nu() * 2) !== Math.floor((nu() - dt) * 2)) tekenPaneel(paneelTekst && nu() - paneelTekstT < 2 ? paneelTekst : null);
+}
+function leesHanden(frame, ref) {
+  const uit = {};
+  for (const bron of frame.session.inputSources) {
+    const kant = bron.handedness;
+    if (bron.hand) {
+      const w = bron.hand.get('wrist'), m = bron.hand.get('middle-finger-phalanx-proximal');
+      const pw = w && frame.getJointPose(w, ref), pm = m && frame.getJointPose(m, ref);
+      if (pw && pm) { const a = pw.transform.position, b = pm.transform.position; uit[kant] = new THREE.Vector3(a.x + (b.x - a.x) * 0.6, a.y + (b.y - a.y) * 0.6, a.z + (b.z - a.z) * 0.6); }
+    } else if (bron.gripSpace) { const gp = frame.getPose(bron.gripSpace, ref); if (gp && !gp.emulatedPosition) { const t = gp.transform.position; uit[kant] = new THREE.Vector3(t.x, t.y, t.z); } }
+  }
+  return uit;
+}
+renderer.setAnimationLoop((t, frame) => {
+  if (!frame) return;
+  const ref = renderer.xr.getReferenceSpace(), pose = frame.getViewerPose(ref);
+  if (!pose) return;
+  const dt = vorigeT === null ? 0 : Math.min((t - vorigeT) / 1000, 0.1); vorigeT = t;
+  const o = pose.transform.orientation;
+  update(pose.transform.position, new THREE.Quaternion(o.x, o.y, o.z, o.w), leesHanden(frame, ref), dt);
+  renderer.render(scene, camera);
+});
+$('startMR').onclick = async () => {
+  try {
+    const sessie = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
+    sessie.addEventListener('select', gooi);
+    sessie.addEventListener('end', () => { vorigeT = null; base = null; wereld.visible = false; gebeurtenis('mr-einde'); toonStats(); });
+    base = null; stilT = 0; ankerP = null; tekenPaneel('Sta stil en kijk recht vooruit');
+    await renderer.xr.setSession(sessie); gebeurtenis('mr-start');
+  } catch (e) { setStatus('MR starten mislukt: ' + e.message, '#ff6b6b'); }
+};
+// testhaak (simulaties zonder headset)
+window.vt = { get rol() { return rol; }, get verbonden() { return verbonden; }, meet, _update: update, gooi, get ander() { return ander; }, get vliegers() { return vliegers; }, THREE, get kop() { return kop; } };
+</script>
+</body>
+</html>
