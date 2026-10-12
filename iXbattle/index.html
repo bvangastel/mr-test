@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iXbattle MR – Ruimtekeeper</title>
+<style>
+  :root{--paars:#662A88;--blauw:#43BFFD;--roze:#EB69BB;--geel:#F6F01D;--bg:#100c1c;--kaart:#1e1830;--tekst:#f2eef8;--zacht:#b9aecb}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--tekst);display:flex;min-height:100vh;justify-content:center;padding:24px 16px}
+  .kaart{max-width:640px;width:100%}
+  h1{font-size:2rem;margin:0 0 .3rem} h1 span{color:var(--blauw)}
+  p,li{line-height:1.5;color:var(--zacht)} ol{padding-left:1.3rem}
+  .vak{background:var(--kaart);border-radius:14px;padding:12px 14px;margin:1rem 0}
+  .vak b{color:var(--tekst)}
+  .blauw{color:var(--blauw)!important}.rood{color:#ff6b5b!important}
+  select{font:inherit;font-size:1.1rem;padding:.4rem .6rem;margin-top:.4rem;border-radius:10px;background:#2b2342;color:var(--tekst);border:1px solid #4a3d63;max-width:100%}
+  .opties label{line-height:2;cursor:pointer} .opties input{transform:scale(1.3);margin-right:.6rem}
+  button{font:inherit;cursor:pointer;border:0;border-radius:12px}
+  #start{font-size:1.5rem;padding:1rem 2.4rem;background:var(--paars);color:#fff;border-bottom:4px solid var(--blauw)}
+  #start:disabled{background:#4a4f57;border-color:#4a4f57;cursor:default}
+  .klein{font-size:.95rem;padding:.45rem 1rem;background:#2b2342;color:var(--tekst);margin-top:.6rem}
+  #status{margin-top:1rem;color:var(--geel);min-height:1.4em}
+  table{margin:1rem 0 0;border-collapse:collapse;width:100%;font-size:.95rem}
+  td,th{padding:5px 8px;border-bottom:1px solid #33294a;text-align:left} th{color:var(--zacht)}
+  .ok{color:#5ee08a}.nee{color:#ff6b6b}
+  #versie{margin-top:1.4rem;font-size:.8rem;color:#6f6585}
+  [hidden]{display:none!important}
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div class="kaart">
+  <h1>iXbattle <span>MR</span> – Ruimtekeeper</h1>
+  <p>Jij bent de keeper van een ruimtestation. Vóór je staat een poort naar de ruimte. Daar schiet een vliegende schotel energiebollen en meteorieten op je af. Links en rechts zie je gewoon je kamer.</p>
+  <div class="vak">
+    <b>Zo werkt het</b>
+    <ol>
+      <li>Leg de controllers weg. Zorg voor ongeveer 1,5 m vrije ruimte om je heen en zet een stoel binnen handbereik.</li>
+      <li>Kies een level en druk op Start. Sta ontspannen en kijk recht vooruit; na 1 seconde stilstaan verschijnt de poort.</li>
+      <li>Robotje <b>Bliep</b> (links voor je) legt alles uit in tekstwolkjes. Bij level 1 begint hij met een warming-up en een korte <b>meting</b>: hoe ver je reikt en hoe diep je door je knieën gaat.</li>
+      <li><b class="blauw">Blauwe energiebol</b> = vangen met je hand. <b class="rood">Rode meteoriet</b> = niet aanraken: duik weg of leun opzij (vanaf level 3). Je voeten blijven op hun plek.</li>
+      <li>Het spel past zich aan jou aan: gaat het twee keer goed, dan wordt het een stapje moeilijker (je ziet een klein ▲-signaal).</li>
+      <li>Een level duurt 2–3 minuten. Daarna kies je in een zwevend menu: nog een keer of het volgende level (tik met je vinger op de knop, of wijs en knijp). Ga je zitten, dan pauzeert het spel.</li>
+    </ol>
+  </div>
+  <div class="vak">
+    <label for="level"><b>Level</b></label><br>
+    <select id="level"></select>
+    <p id="levelInfo" style="margin:.4rem 0 0"></p>
+  </div>
+  <div class="vak opties">
+    <label><input type="checkbox" id="optUitleg" checked> Uitleg en warming-up met Bliep (± 1 min)</label><br>
+    <label><input type="checkbox" id="optTijd" checked> Resterende tijd tonen</label>
+  </div>
+  <button id="start" disabled>Even geduld…</button>
+  <div id="status"></div>
+  <div id="resultaten"></div>
+  <button class="klein" id="download" hidden>Meetbestand downloaden (JSON)</button>
+  <div id="versie"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+const VERSIE = '0.1';
+document.getElementById('versie').textContent = 'versie ' + VERSIE;
+const VB = new URLSearchParams(location.search);
+
+// ---------- Instellingen ----------
+const D = {
+  opstelTijd: 1.0, opstelMarge: 0.015,   // zo lang stilstaan (hoofd binnen 1,5 cm) = opgesteld
+  zitten: 0.42,          // hoofd zo veel lager dan bij het opstellen (1 s) = zitten = pauze
+  opstaan: 0.20,
+  aanloop: 0.9,          // de schotel licht zo lang op voordat hij schiet
+  naSchot: 1.3,          // rust na elke bol
+  vangAfst: 0.17,        // handpalm tot midden van de bol = gevangen
+  tipAfst: 0.12,         // of een vingertop zo dichtbij
+  vangVanaf: -2.2,       // pas te vangen als de bol dichterbij is dan 2,2 m
+  doelZ: -0.45,          // de bol komt 45 cm voor je hoofd langs
+  maxOpzij: 1.15,        // nooit verder opzij dan dit (binnen de doelpalen)
+  lichaamAfst: 0.35,     // zonder handen in beeld: bol binnen 35 cm van je hoofd = met je lijf tegengehouden
+  roodRaak: 0.22,        // meteoriet binnen 22 cm van je hoofd = geraakt
+  roodHand: 0.15,        // hand zo dicht bij een meteoriet = aangeraakt
+  reactieHand: 0.08, reactieHoofd: 0.06,
+  poortZ: -4.5, poortR: 1.6, poortY: 1.7,
+  ufoZ: -7.5,
+  bliep: [-1.45, -0.05, -2.8]   // plek van Bliep (x, hoogte t.o.v. je ogen, z)
+};
+const STANDAARD = { reikL: 0.70, reikR: 0.70, hoog: 0.45, buk: 0.30 };   // reik opzij (m van je hoofd), reik omhoog (m boven je ogen), bukken (m)
+// ---------- Moeilijkheid per vaardigheid (treden 1–5) ----------
+const NIVEAU = {
+  midden: { naam: 'Vangen', treden: [0.10, 0.18, 0.26, 0.34, 0.42], tijd: [3.4, 3.0, 2.7, 2.4, 2.1], uitleg: 'afstand opzij (m)' },
+  reiken: { naam: 'Reiken', treden: [0.55, 0.68, 0.80, 0.92, 1.05], tijd: [3.2, 2.9, 2.6, 2.3, 2.0], uitleg: 'deel van je eigen reik opzij' },
+  hoog:   { naam: 'Hoog', treden: [0.45, 0.60, 0.75, 0.90, 1.00], tijd: [3.2, 2.9, 2.6, 2.3, 2.0], uitleg: 'deel van je eigen reik omhoog' },
+  laag:   { naam: 'Laag', treden: [0.56, 0.49, 0.43, 0.37, 0.31], tijd: [3.2, 2.9, 2.6, 2.3, 2.0], uitleg: 'hoogte als deel van je ooghoogte' },
+  rood:   { naam: 'Ontwijken', treden: [3.4, 3.0, 2.6, 2.3, 2.0], tijd: [3.4, 3.0, 2.6, 2.3, 2.0], uitleg: 'vliegtijd meteoriet (s)' }
+};
+// ---------- Levels ----------
+const vang = (zone, extra = {}) => ({ soort: 'vang', zone, vaardigheid: zone === 'links' || zone === 'rechts' ? 'reiken' : zone, ...extra });
+const rood = (extra = {}) => ({ soort: 'rood', zone: 'hoofd', vaardigheid: 'rood', ...extra });
+function schud(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function mengLR(n) {   // evenveel links als rechts, nooit drie keer dezelfde kant achter elkaar
+  const uit = []; let l = Math.ceil(n / 2), r = Math.floor(n / 2);
+  while (l + r > 0) {
+    let k = Math.random() < l / (l + r) ? 'links' : 'rechts';
+    if (uit.length >= 2 && uit.at(-1) === k && uit.at(-2) === k) k = k === 'links' ? 'rechts' : 'links';
+    if (k === 'links' && l <= 0) k = 'rechts'; if (k === 'rechts' && r <= 0) k = 'links';
+    uit.push(k); if (k === 'links') l--; else r--;
+  }
+  return uit;
+}
+function maakL3() {
+  const rest = schud([...Array(6).fill('hoog'), ...Array(6).fill('laag'), 'links', 'rechts'].map(z => vang(z)));
+  const uit = [vang('links'), vang('rechts'), vang('hoog'), vang('laag')];
+  const roodNa = new Set([1, 3, 6, 8, 10, 12]);
+  rest.forEach((s, i) => { uit.push(s); if (roodNa.has(i)) uit.push(rood(i === 1 ? { eerste: true } : {})); });
+  return uit;
+}
+const LEVELS = [
+  { nr: 1, naam: 'Vangen', nieuw: 'blauwe energiebollen vangen', intro: 'Level 1: vang de blauwe energiebollen!', maak: () => Array.from({ length: 18 }, (_, i) => vang('midden', { kant: i % 2 ? 1 : -1 })), start: { midden: 0 }, max: { midden: 3 } },
+  { nr: 2, naam: 'Links en rechts', nieuw: 'ver reiken naar links en rechts', intro: 'Level 2: links en rechts. Reik zo ver je kunt!', maak: () => [vang('midden', { kant: -1 }), vang('midden', { kant: 1 }), ...mengLR(20).map(z => vang(z))], start: { midden: 1, reiken: 0 }, max: { midden: 4, reiken: 4 } },
+  { nr: 3, naam: 'Hoog, laag en rood', nieuw: 'hoge en lage bollen, rode meteorieten ontwijken', intro: 'Level 3: hoog en laag. En pas op voor rood!', maak: maakL3, start: { reiken: 1, hoog: 0, laag: 0, rood: 0 }, max: { reiken: 4, hoog: 4, laag: 4, rood: 4 } },
+  { nr: 4, naam: 'Opzij leunen' }, { nr: 5, naam: 'Stap opzij' }, { nr: 6, naam: 'Alles door elkaar' }, { nr: 7, naam: 'Schijnbewegingen' },
+  { nr: 8, naam: 'Twee kort na elkaar' }, { nr: 9, naam: 'Kleur op het laatst' }, { nr: 10, naam: 'Hoog tempo' }, { nr: 11, naam: 'Finale: de beker' }
+];
+let LV = LEVELS[0], schoten = [];
+let niveau = {}, reeks = {}, kal = null;
+function laadLevel(nr) {
+  LV = LEVELS[nr - 1]; schoten = LV.maak();
+  for (const k in LV.max) { const oud = niveau[k]; niveau[k] = oud === undefined ? LV.start[k] : Math.max(LV.start[k], Math.min(LV.max[k], oud)); }
+}
+const trede = (k) => NIVEAU[k].treden[niveau[k] ?? 0];
+function pasAan(k, gelukt) {
+  if (!(k in NIVEAU) || !LV.max || !(k in LV.max)) return;
+  const oud = niveau[k];
+  if (gelukt) { reeks[k] = (reeks[k] || 0) + 1; if (reeks[k] >= 2) { niveau[k] = Math.min(LV.max[k], niveau[k] + 1); reeks[k] = 0; } }
+  else { niveau[k] = Math.max(0, niveau[k] - 1); reeks[k] = 0; }
+  if (niveau[k] !== oud) gebeurtenis('niveau', { vaardigheid: k, van: oud, naar: niveau[k], waarde: trede(k) });
+  if (niveau[k] > oud) niveauOmhoog(k);
+}
+let toonTijd = true;
+const K = { paars: 0x662A88, blauw: 0x43BFFD, roze: 0xEB69BB, geel: 0xF6F01D, donker: 0x215C9A };
+
+// ---------- three.js + WebXR ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
+renderer.domElement.style.display = 'none';
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, 1, 0.01, 120);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8899aa, 2.2));
+const zon = new THREE.DirectionalLight(0xffffff, 1.2); zon.position.set(1, 3, 2); scene.add(zon);
+// alles van het spel hangt in 'wereld' (lokaal: -Z = vooruit, +X = rechts, oorsprong = startplek)
+const wereld = new THREE.Group(); wereld.visible = false; scene.add(wereld);
+
+function pasLetter(c, tekst, maxB, groot, min = 24, stijl = 'bold', familie = 'system-ui, sans-serif') {
+  let f = groot; c.font = `${stijl} ${f}px ${familie}`;
+  while (c.measureText(tekst).width > maxB && f > min) { f -= 2; c.font = `${stijl} ${f}px ${familie}`; }
+  return f;
+}
+function canvasTex(w, h, teken) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  teken(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function tekenVlak(w, h, bw, bh, ro = 10) {   // plat bord met eigen canvas
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+  const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.renderOrder = ro; m.userData = { canvas, ctx: canvas.getContext('2d'), tex };
+  return m;
+}
+// ---------- Gedeelde bouwstenen ----------
+const toonGrad = (() => { const d = new Uint8Array([95, 175, 255]); const t = new THREE.DataTexture(d, 3, 1, THREE.RedFormat); t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true; return t; })();
+const matCache = {};
+function tm(kleur, extra = {}) {
+  const sleutel = kleur + JSON.stringify(extra);
+  if (!matCache[sleutel]) matCache[sleutel] = new THREE.MeshToonMaterial({ color: kleur, gradientMap: toonGrad, ...extra });
+  return matCache[sleutel];
+}
+const vcMat = new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: toonGrad });
+const vcGlow = new THREE.MeshBasicMaterial({ vertexColors: true });
+const G = {
+  bol: new THREE.SphereGeometry(1, 16, 12), bolLaag: new THREE.SphereGeometry(1, 8, 6),
+  halfBol: new THREE.SphereGeometry(1, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+  kegel: new THREE.ConeGeometry(1, 1, 10), cil: new THREE.CylinderGeometry(1, 1, 1, 10), doos: new THREE.BoxGeometry(1, 1, 1)
+};
+// voegt losse stukken samen tot één geometrie met kleuren: [geo, kleur, [x,y,z], [rx,ry,rz], [sx,sy,sz]]
+function bouw(delen) {
+  const stukken = [], m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
+  let n = 0;
+  for (const [geo, kleur, p = [0, 0, 0], r = [0, 0, 0], sc = [1, 1, 1]] of delen) {
+    const g = geo.index ? geo.toNonIndexed() : geo.clone();
+    g.applyMatrix4(m.compose(new THREE.Vector3(...p), q.setFromEuler(e.set(...r)), new THREE.Vector3(...(typeof sc === 'number' ? [sc, sc, sc] : sc))));
+    stukken.push([g, c.set(kleur).clone()]); n += g.attributes.position.count;
+  }
+  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  let i = 0;
+  for (const [g, k] of stukken) {
+    pos.set(g.attributes.position.array, i * 3); nor.set(g.attributes.normal.array, i * 3);
+    for (let j = 0; j < g.attributes.position.count; j++) col.set([k.r, k.g, k.b], (i + j) * 3);
+    i += g.attributes.position.count; g.dispose();
+  }
+  const uit = new THREE.BufferGeometry();
+  uit.setAttribute('position', new THREE.BufferAttribute(pos, 3)); uit.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); uit.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return uit;
+}
+const _yAs = new THREE.Vector3(0, 1, 0);
+function staafDeel(p0, p1, r, kleur, geo = G.cil) {   // cilinder tussen twee punten, als deel voor bouw()
+  const a = new THREE.Vector3(...p0), b = new THREE.Vector3(...p1), d = b.clone().sub(a), len = d.length();
+  const e = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().setFromUnitVectors(_yAs, d.normalize()));
+  return [geo, kleur, a.clone().add(b).multiplyScalar(0.5).toArray(), [e.x, e.y, e.z], [r, len, r]];
+}
+// zacht gloeiend rondje (voor halo's en vonken)
+const gloedTex = canvasTex(128, 128, (g, w, h) => {
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,0.7)'); gr.addColorStop(0.6, 'rgba(255,255,255,0.15)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, w, h);
+});
+function halo(kleur, schaal, opacity = 1) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: gloedTex, color: kleur, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false }));
+  s.scale.setScalar(schaal); return s;
+}
+
+// ---------- De poort: een ring met daarachter de ruimte ----------
+const poort = new THREE.Group(); poort.position.set(0, D.poortY, D.poortZ); wereld.add(poort);
+{
+  const R = D.poortR, delen = [];
+  // stevige paarse ring met blokken
+  const ringGeo = new THREE.TorusGeometry(R + 0.07, 0.1, 10, 72);
+  delen.push([ringGeo, '#5a2479']);
+  delen.push([new THREE.TorusGeometry(R + 0.2, 0.035, 6, 72), '#3b1852']);
+  for (let i = 0; i < 16; i++) {
+    const a = i / 16 * Math.PI * 2;
+    delen.push([G.doos, '#7b3aa3', [Math.cos(a) * (R + 0.12), Math.sin(a) * (R + 0.12), 0.04], [0, 0, a], [0.3, 0.12, 0.22]]);
+  }
+  // voeten
+  for (const k of [-1, 1]) {
+    const a = -Math.PI / 2 + k * 0.55, x = Math.cos(a) * (R + 0.1), y = Math.sin(a) * (R + 0.1);
+    delen.push(staafDeel([x, y, 0], [x + k * 0.35, -D.poortY, 0], 0.07, '#3b1852'));
+    delen.push([G.doos, '#2c1240', [x + k * 0.35, -D.poortY + 0.03, 0], [0, 0, 0], [0.5, 0.06, 0.5]]);
+  }
+  poort.add(new THREE.Mesh(bouw(delen), vcMat));
+  // lampjes rond de ring (gloeien)
+  const lamp = [];
+  for (let i = 0; i < 16; i++) { const a = (i + 0.5) / 16 * Math.PI * 2; lamp.push([G.bolLaag, i % 2 ? '#F6F01D' : '#EB69BB', [Math.cos(a) * (R + 0.12), Math.sin(a) * (R + 0.12), 0.12], [0, 0, 0], 0.035]); }
+  poort.add(new THREE.Mesh(bouw(lamp), vcGlow));
+  const binnen = new THREE.Mesh(new THREE.TorusGeometry(R, 0.022, 6, 96), new THREE.MeshBasicMaterial({ color: 0x8fe3ff }));
+  poort.add(binnen);
+  // gloed langs de binnenrand (additief: het midden blijft doorzichtig)
+  const rand = canvasTex(256, 256, (g, w, h) => {
+    const gr = g.createRadialGradient(128, 128, 0, 128, 128, 128), r0 = R / (R + 0.5);
+    gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(Math.max(0, r0 - 0.16), 'rgba(0,0,0,0)'); gr.addColorStop(r0 - 0.01, 'rgba(67,191,253,0.9)'); gr.addColorStop(r0 + 0.02, 'rgba(67,191,253,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, w, h);
+  });
+  const gloed = new THREE.Mesh(new THREE.PlaneGeometry(2 * (R + 0.5), 2 * (R + 0.5)), new THREE.MeshBasicMaterial({ map: rand, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+  gloed.position.z = 0.02; poort.add(gloed); poort.userData.gloed = gloed;
+  // onzichtbare muur met een rond gat: alles achter de poort is alleen door het gat te zien
+  const vorm = new THREE.Shape(); vorm.moveTo(-300, -300); vorm.lineTo(300, -300); vorm.lineTo(300, 300); vorm.lineTo(-300, 300); vorm.closePath();
+  const gat = new THREE.Path(); gat.absarc(0, 0, R - 0.01, 0, Math.PI * 2, true); vorm.holes.push(gat);
+  const muur = new THREE.Mesh(new THREE.ShapeGeometry(vorm, 48), new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide }));
+  muur.renderOrder = -10; poort.add(muur);
+}
+// ---------- De ruimte achter de poort ----------
+const ruimte = new THREE.Group(); wereld.add(ruimte);
+{
+  // donkere achtergrond alléén achter de poort (geen bol om je heen: dan zou je kamer zwart worden)
+  const lucht = new THREE.Mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshBasicMaterial({ color: 0x07051a }));
+  lucht.position.set(0, 2, -66); ruimte.add(lucht);
+  // sterren
+  const n = 1400, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    pos.set([(Math.random() - 0.5) * 70, -12 + Math.random() * 50, -9 - Math.random() * 55], i * 3);
+    c.setHSL(0.55 + Math.random() * 0.2, 0.5, 0.75 + Math.random() * 0.25); col.set([c.r, c.g, c.b], i * 3);
+  }
+  const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); sg.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  ruimte.add(new THREE.Points(sg, new THREE.PointsMaterial({ size: 0.12, map: gloedTex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })));
+  // nevels
+  for (const [x, y, z, s, k, o] of [[-14, 10, -50, 40, 0x662A88, 0.55], [16, 4, -55, 44, 0x215C9A, 0.6], [2, 18, -58, 36, 0xEB69BB, 0.3]]) {
+    const neb = halo(k, s, o); neb.position.set(x, y, z); ruimte.add(neb);
+  }
+  // planeet met ring
+  const planTex = canvasTex(256, 128, (g, w, h) => {
+    const kl = ['#e58f4f', '#f2b36e', '#c8693b', '#f7d29a', '#d77c48', '#efc27f'];
+    for (let y = 0; y < h; y += 8) { g.fillStyle = kl[(y / 8 + (y % 24 ? 0 : 2)) % kl.length]; g.fillRect(0, y, w, 8 + Math.sin(y) * 3); }
+    g.fillStyle = 'rgba(160,60,30,0.6)'; g.beginPath(); g.ellipse(170, 74, 22, 10, 0, 0, Math.PI * 2); g.fill();
+  });
+  const planeet = new THREE.Mesh(new THREE.SphereGeometry(4.2, 32, 20), new THREE.MeshLambertMaterial({ map: planTex }));
+  planeet.position.set(-9, 8, -34); planeet.rotation.z = 0.3; ruimte.add(planeet);
+  const ringP = new THREE.Mesh(new THREE.RingGeometry(5.4, 8.2, 64), new THREE.MeshBasicMaterial({ color: 0xe8c79a, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }));
+  ringP.position.copy(planeet.position); ringP.rotation.set(-1.25, 0.25, 0.3); ruimte.add(ringP);
+  const maan = new THREE.Mesh(new THREE.SphereGeometry(1.2, 20, 14), tm('#b9c3d6')); maan.position.set(9, 6.5, -26); ruimte.add(maan);
+  for (let i = 0; i < 6; i++) { const kr = new THREE.Mesh(G.bolLaag, tm('#8f9ab0')); kr.scale.set(0.25, 0.25, 0.08); const a = i * 1.7; kr.position.set(9 + Math.cos(a) * 0.7, 6.5 + Math.sin(a) * 0.7, -24.9); ruimte.add(kr); }
+  // ver ruimtestation
+  const st = new THREE.Mesh(bouw([
+    [new THREE.TorusGeometry(1.6, 0.18, 8, 32), '#d7deea'], [G.cil, '#aab6c8', [0, 0, 0], [Math.PI / 2, 0, 0], [0.35, 1.4, 0.35]],
+    staafDeel([-1.6, 0, 0], [1.6, 0, 0], 0.06, '#aab6c8'), staafDeel([0, -1.6, 0], [0, 1.6, 0], 0.06, '#aab6c8'),
+    [G.doos, '#43BFFD', [2.6, 0, 0], [0, 0, 0], [1.6, 0.05, 0.7]], [G.doos, '#43BFFD', [-2.6, 0, 0], [0, 0, 0], [1.6, 0.05, 0.7]]
+  ]), vcMat);
+  st.position.set(10, -2.5, -40); st.rotation.set(0.5, 0.4, 0.2); ruimte.add(st); ruimte.userData.station = st;
+}
+// ---------- De vliegende schotel (schutter) ----------
+const ufo = new THREE.Group(); wereld.add(ufo);
+{
+  const delen = [
+    [G.bol, '#c9d2dc', [0, 0, 0], [0, 0, 0], [0.62, 0.13, 0.62]],
+    [new THREE.TorusGeometry(0.58, 0.045, 8, 40), '#8a95a3', [0, 0, 0], [Math.PI / 2, 0, 0]],
+    [G.bol, '#9aa6b5', [0, -0.07, 0], [0, 0, 0], [0.32, 0.09, 0.32]],
+    // groen buitenaardsje in de koepel
+    [G.bol, '#7ed957', [0, 0.17, 0], [0, 0, 0], [0.13, 0.12, 0.12]],
+    [G.bol, '#111111', [-0.05, 0.19, 0.095], [0, 0, 0.4], [0.035, 0.05, 0.03]],
+    [G.bol, '#111111', [0.05, 0.19, 0.095], [0, 0, -0.4], [0.035, 0.05, 0.03]],
+    staafDeel([-0.05, 0.27, 0], [-0.09, 0.36, 0], 0.008, '#7ed957'), staafDeel([0.05, 0.27, 0], [0.09, 0.36, 0], 0.008, '#7ed957'),
+    [G.bolLaag, '#F6F01D', [-0.09, 0.37, 0], [0, 0, 0], 0.018], [G.bolLaag, '#F6F01D', [0.09, 0.37, 0], [0, 0, 0], 0.018]
+  ];
+  ufo.add(new THREE.Mesh(bouw(delen), vcMat));
+  const lamp = [];
+  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; lamp.push([G.bolLaag, i % 2 ? '#F6F01D' : '#43BFFD', [Math.cos(a) * 0.5, 0.02, Math.sin(a) * 0.5], [0, 0, 0], 0.03]); }
+  ufo.add(new THREE.Mesh(bouw(lamp), vcGlow));
+  const koepel = new THREE.Mesh(G.halfBol, new THREE.MeshToonMaterial({ color: 0xbfe9ff, gradientMap: toonGrad, transparent: true, opacity: 0.4, depthWrite: false }));
+  koepel.scale.set(0.27, 0.3, 0.27); koepel.position.y = 0.06; ufo.add(koepel);
+  const loop = new THREE.Mesh(G.bol, new THREE.MeshBasicMaterial({ color: K.blauw })); loop.scale.set(0.11, 0.05, 0.11); loop.position.set(0, -0.12, 0.05); ufo.add(loop);
+  const gl = halo(K.blauw, 0.5, 0.9); gl.position.set(0, -0.12, 0.12); ufo.add(gl);
+  ufo.userData = { loop, gloed: gl, x: 0, y: 1.85, doelX: 0, doelY: 1.85, laad: 0, kleur: K.blauw };
+  ufo.position.set(0, 1.85, D.ufoZ);
+}
+function updateUfo(dt, t) {
+  const u = ufo.userData;
+  if (!u.vast) { u.doelX = Math.sin(t * 0.45) * 0.6; u.doelY = 1.85 + Math.sin(t * 1.1) * 0.08; }
+  const k = Math.min(1, dt * (u.vast ? 6 : 1.5));
+  const oudX = u.x; u.x += (u.doelX - u.x) * k; u.y += (u.doelY - u.y) * k;
+  ufo.position.set(u.x, u.y + Math.sin(t * 2.3) * 0.02, D.ufoZ);
+  ufo.rotation.z = THREE.MathUtils.clamp(-(u.x - oudX) / Math.max(dt, 1e-3) * 0.25, -0.3, 0.3);
+  ufo.rotation.x = 0.25;   // iets naar je toe gekanteld
+  ufo.children[0].rotation.y += dt * 0.2; ufo.children[1].rotation.y += dt * 1.5;
+  u.loop.material.color.setHex(u.kleur); u.gloed.material.color.setHex(u.kleur);
+  const s = 0.5 + u.laad * 0.9 + (u.laad > 0 ? Math.sin(t * 30) * 0.05 : 0);
+  u.gloed.scale.setScalar(s); u.loop.scale.set(0.11 + u.laad * 0.04, 0.05, 0.11 + u.laad * 0.04);
+}
+// ---------- Doelpalen rond jou + vloerring ----------
+const doel = new THREE.Group(); wereld.add(doel);
+const paalMat = new THREE.MeshBasicMaterial({ color: K.blauw, transparent: true, opacity: 0.5, depthWrite: false });
+function bouwDoel(hoogte) {
+  doel.clear();
+  const B = 1.35;
+  for (const k of [-1, 1]) {
+    const p = new THREE.Mesh(G.cil, paalMat); p.scale.set(0.022, hoogte, 0.022); p.position.set(k * B, hoogte / 2, D.doelZ); doel.add(p);
+    const top = halo(K.blauw, 0.18, 0.9); top.position.set(k * B, hoogte, D.doelZ); doel.add(top);
+    const voet = new THREE.Mesh(G.cil, tm('#3b1852')); voet.scale.set(0.09, 0.03, 0.09); voet.position.set(k * B, 0.015, D.doelZ); doel.add(voet);
+  }
+  const lat = new THREE.Mesh(G.cil, paalMat); lat.scale.set(0.022, 2 * B, 0.022); lat.rotation.z = Math.PI / 2; lat.position.set(0, hoogte, D.doelZ); doel.add(lat);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.33, 0.36, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: K.blauw, transparent: true, opacity: 0.55, depthWrite: false }));
+  ring.position.y = 0.01; doel.add(ring);
+}
+bouwDoel(2.3);
+
+// ---------- Bliep, het robotje dat uitlegt ----------
+const bliep = new THREE.Group(); wereld.add(bliep);
+{
+  const lijf = new THREE.Group(); bliep.add(lijf);
+  lijf.add(new THREE.Mesh(bouw([
+    [G.bol, '#eef2f7', [0, 0, 0], [0, 0, 0], [0.16, 0.15, 0.15]],
+    [G.bol, '#1b1f3b', [0, 0, 0.09], [0, 0, 0], [0.125, 0.08, 0.075]],
+    [G.cil, '#662A88', [-0.165, 0, 0], [0, 0, Math.PI / 2], [0.045, 0.03, 0.045]], [G.cil, '#662A88', [0.165, 0, 0], [0, 0, Math.PI / 2], [0.045, 0.03, 0.045]],
+    staafDeel([0, 0.14, 0], [0, 0.25, 0], 0.008, '#9aa6b5'),
+    [G.bol, '#eef2f7', [0, -0.25, 0], [0, 0, 0], [0.12, 0.13, 0.1]],
+    [G.bol, '#662A88', [0, -0.25, 0.02], [0, 0, 0], [0.115, 0.07, 0.095]],
+    [G.kegel, '#9aa6b5', [0, -0.4, 0], [Math.PI, 0, 0], [0.06, 0.07, 0.06]]
+  ]), vcMat));
+  const antenne = new THREE.Mesh(G.bolLaag, new THREE.MeshBasicMaterial({ color: K.geel })); antenne.scale.setScalar(0.025); antenne.position.y = 0.26; lijf.add(antenne);
+  const buik = new THREE.Mesh(G.bolLaag, new THREE.MeshBasicMaterial({ color: K.geel })); buik.scale.set(0.03, 0.03, 0.01); buik.position.set(0, -0.24, 0.11); lijf.add(buik);
+  const oogMat = new THREE.MeshBasicMaterial({ color: 0x6ff0ff });
+  const ogen = [-0.045, 0.045].map(x => { const o = new THREE.Mesh(G.bol, oogMat); o.scale.set(0.022, 0.03, 0.01); o.position.set(x, 0.008, 0.162); lijf.add(o); return o; });
+  const mond = new THREE.Mesh(new THREE.TorusGeometry(0.025, 0.005, 4, 12, Math.PI), oogMat); mond.rotation.z = Math.PI; mond.position.set(0, -0.035, 0.158); lijf.add(mond);
+  const armen = [-1, 1].map(k => {
+    const a = new THREE.Group(); a.position.set(k * 0.13, -0.2, 0); lijf.add(a);
+    a.add(new THREE.Mesh(bouw([staafDeel([0, 0, 0], [0, -0.15, 0], 0.025, '#eef2f7'), [G.bol, '#662A88', [0, -0.17, 0], [0, 0, 0], 0.038]]), vcMat));
+    return a;
+  });
+  const vlam = halo(K.blauw, 0.22, 0.9); vlam.position.y = -0.47; lijf.add(vlam);
+  bliep.userData = { lijf, ogen, armen, vlam, antenne, pose: { wz: 0, ez: 0, wx: 0, ex: 0, dy: 0, leun: 0 }, gebaar: 'rust' };
+}
+// gebaren: w = arm aan jouw linkerkant, e = arm aan jouw rechterkant (z: opzij omhoog, x: naar voren)
+const GEBAREN = {
+  rust: { wz: -0.15, ez: 0.15, wx: 0, ex: 0, dy: 0, leun: 0 },
+  zwaai: { wz: -0.15, ez: 2.6, wx: 0, ex: 0, dy: 0, leun: 0, zwaai: 1 },
+  juich: { wz: -2.6, ez: 2.6, wx: 0, ex: 0, dy: 0.05, leun: 0, zwaai: 1 },
+  vang: { wz: -0.3, ez: 0.3, wx: -1.4, ex: -1.4, dy: 0, leun: 0 },
+  reikL: { wz: -1.55, ez: 0.2, wx: 0, ex: 0, dy: 0, leun: -0.25 },
+  reikR: { wz: -0.2, ez: 1.55, wx: 0, ex: 0, dy: 0, leun: 0.25 },
+  omhoog: { wz: -2.9, ez: 2.9, wx: 0, ex: 0, dy: 0.06, leun: 0 },
+  buk: { wz: -0.3, ez: 0.3, wx: -1.2, ex: -1.2, dy: -0.22, leun: 0 },
+  duik: { wz: -0.6, ez: 0.6, wx: 0, ex: 0, dy: -0.2, leun: 0.3 },
+  wijs: { wz: -0.15, ez: 0.2, wx: 0, ex: -1.5, dy: 0, leun: 0 }
+};
+function updateBliep(dt, t, kopL) {
+  const u = bliep.userData, doelP = GEBAREN[u.gebaar] || GEBAREN.rust, p = u.pose, k = Math.min(1, dt * 6);
+  for (const s of ['wz', 'ez', 'wx', 'ex', 'dy', 'leun']) p[s] += (doelP[s] - p[s]) * k;
+  const zw = doelP.zwaai ? Math.sin(t * 9) * 0.35 : 0;
+  u.armen[0].rotation.set(p.wx, 0, p.wz + (doelP.zwaai && doelP.wz < -1 ? zw : 0));
+  u.armen[1].rotation.set(p.ex, 0, p.ez + (doelP.zwaai ? zw : 0));
+  u.lijf.position.set(p.leun * 0.5, Math.sin(t * 2) * 0.025 + p.dy, 0);
+  u.lijf.rotation.z = -p.leun * 0.6;
+  const knip = (t % 3.7) < 0.12 ? 0.15 : 1; for (const o of u.ogen) o.scale.y = 0.03 * knip;
+  u.vlam.scale.setScalar(0.2 + Math.random() * 0.05);
+  u.antenne.material.color.setHex((t % 1.2) < 0.6 ? K.geel : K.roze);
+  if (kopL) bliep.lookAt(wereld.localToWorld(new THREE.Vector3(kopL.x, bliep.getWorldPosition(_tmp).y, kopL.z)));
+}
+const _tmp = new THREE.Vector3();
+
+// ---------- Tekstwolkje boven Bliep ----------
+const wolk = tekenVlak(1024, 420, 1.1, 0.451, 10); wolk.visible = false; scene.add(wolk);
+let wolkTekst = null;
+function zetWolk(tekst, accent = '#662A88') {
+  if (tekst === wolkTekst) return;
+  if (tekst) geluid.wolk();
+  wolkTekst = tekst;
+  const { ctx: g, tex } = wolk.userData; g.clearRect(0, 0, 1024, 420);
+  if (!tekst) { wolk.visible = false; tex.needsUpdate = true; return; }
+  wolk.visible = true;
+  let f = 84, regels;
+  do {
+    g.font = `bold ${f}px system-ui, sans-serif`;
+    regels = []; let r = '';
+    for (const w of tekst.split(' ')) { const t = r ? r + ' ' + w : w; if (g.measureText(t).width > 900 && r) { regels.push(r); r = w; } else r = t; }
+    regels.push(r); f -= 4;
+  } while ((regels.length > 2 || regels.some(r => g.measureText(r).width > 900)) && f > 36);
+  f += 4; g.font = `bold ${f}px system-ui, sans-serif`;
+  const hoog = regels.length * (f + 18) + 50, y0 = (330 - hoog) / 2;
+  g.fillStyle = '#ffffff'; g.beginPath(); g.roundRect(20, y0, 984, hoog, 60); g.fill();
+  g.beginPath(); g.moveTo(330, y0 + hoog - 2); g.lineTo(300, 400); g.lineTo(400, y0 + hoog - 2); g.fill();   // staartje naar Bliep
+  g.fillStyle = accent; g.fillRect(70, y0 + hoog - 14, 884, 8);
+  g.fillStyle = '#24123a'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  regels.forEach((r, i) => g.fillText(r, 512, y0 + 25 + (f + 18) * (i + 0.5) + 4));
+  tex.needsUpdate = true;
+}
+// ---------- Klein signaal bij een niveau omhoog ----------
+const nivBord = tekenVlak(512, 96, 0.42, 0.079, 11); nivBord.material.depthTest = false; nivBord.visible = false; scene.add(nivBord);
+let nivT = -9;
+function niveauOmhoog(k) {
+  const c = nivBord.userData.ctx; c.clearRect(0, 0, 512, 96);
+  c.fillStyle = 'rgba(36,18,58,0.85)'; c.beginPath(); c.roundRect(4, 4, 504, 88, 40); c.fill();
+  c.fillStyle = '#F6F01D'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  pasLetter(c, `▲ ${NIVEAU[k].naam} · niveau ${niveau[k] + 1}`, 470, 44);
+  c.fillText(`▲ ${NIVEAU[k].naam} · niveau ${niveau[k] + 1}`, 256, 50);
+  nivBord.userData.tex.needsUpdate = true; nivT = tijd;
+  toon(1046, 0.12, 0, 0.06); toon(1568, 0.2, 0.1, 0.05);
+}
+// ---------- Pop-up bij een vangst of misser ----------
+const popup = tekenVlak(512, 128, 0.36, 0.09, 12); popup.material.depthTest = false; popup.visible = false; wereld.add(popup);
+let popupT = -9;
+function zetPopup(tekst, kleur, pos) {
+  const c = popup.userData.ctx; c.clearRect(0, 0, 512, 128);
+  c.textAlign = 'center'; c.textBaseline = 'middle'; pasLetter(c, tekst, 490, 80);
+  c.lineWidth = 12; c.strokeStyle = 'rgba(20,10,40,0.85)'; c.strokeText(tekst, 256, 66); c.fillStyle = kleur; c.fillText(tekst, 256, 66);
+  popup.userData.tex.needsUpdate = true; popup.position.copy(pos); popup.userData.y0 = pos.y; popup.visible = true; popupT = tijd;
+}
+// ---------- Bord boven de poort: level, voortgang, resterende tijd ----------
+const bord = tekenVlak(1024, 196, 2.4, 0.46, 9); bord.position.set(0, D.poortY + D.poortR + 0.36, D.poortZ + 0.12); wereld.add(bord);
+function tekenBord(frac, rest) {
+  const c = bord.userData.ctx, w = 1024, h = 196;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = '#1b1240'; c.beginPath(); c.roundRect(4, 4, w - 8, h - 8, 30); c.fill(); c.strokeStyle = '#43BFFD'; c.lineWidth = 6; c.stroke();
+  c.fillStyle = '#ffffff'; c.textBaseline = 'middle'; c.font = 'bold 48px system-ui, sans-serif';
+  const titel = `Level ${LV.nr} · ${LV.naam}`;
+  c.textAlign = 'left'; pasLetter(c, titel, 700, 50); c.fillText(titel, 34, 60);
+  c.textAlign = 'right'; c.font = 'bold 46px system-ui, sans-serif'; c.fillStyle = '#F6F01D';
+  if (toonTijd && rest !== null) { const s = Math.round(rest); c.fillText(`nog ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`, w - 34, 60); }
+  const x0 = 40, x1 = w - 40, y = 118, bh = 40, f = Math.max(0, Math.min(1, frac));
+  c.fillStyle = 'rgba(255,255,255,0.2)'; c.beginPath(); c.roundRect(x0, y, x1 - x0, bh, 20); c.fill();
+  c.fillStyle = '#43BFFD'; c.beginPath(); c.roundRect(x0, y, Math.max(bh, (x1 - x0) * f), bh, 20); c.fill();
+  bord.userData.tex.needsUpdate = true;
+}
+// ---------- Meter rechtsonder: goed, op rij ----------
+const meter = tekenVlak(512, 384, 0.3, 0.225, 9); wereld.add(meter);
+function tekenMeter(goed, gehad, opRij) {
+  const c = meter.userData.ctx, w = 512, h = 384;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = 'rgba(22,14,44,0.85)'; c.beginPath(); c.roundRect(6, 6, w - 12, h - 12, 36); c.fill(); c.strokeStyle = '#43BFFD'; c.lineWidth = 6; c.stroke();
+  c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillStyle = '#b9aecb'; c.font = 'bold 34px system-ui, sans-serif'; c.fillText(`LEVEL ${LV.nr}`, 34, 50);
+  c.textAlign = 'right'; c.fillText(`${Math.min(gehad + (spel.staat === 'vlucht' ? 1 : 0), schoten.length)}/${schoten.length}`, w - 34, 50);
+  c.textAlign = 'center'; c.fillStyle = '#5ee08a'; c.font = 'bold 130px system-ui, sans-serif'; c.fillText(`${goed}`, 190, 170);
+  c.fillStyle = '#ffffff'; c.font = 'bold 56px system-ui, sans-serif'; c.textAlign = 'left'; c.fillText(`/ ${gehad} ✓`, 262, 180);
+  c.strokeStyle = 'rgba(255,255,255,0.25)'; c.lineWidth = 3; c.beginPath(); c.moveTo(34, 262); c.lineTo(w - 34, 262); c.stroke();
+  c.textAlign = 'center'; c.fillStyle = '#F6F01D'; c.font = 'bold 44px system-ui, sans-serif';
+  c.fillText(opRij >= 2 ? `${opRij} op rij ${'★'.repeat(Math.min(5, Math.floor(opRij / 2)))}` : 'goed op rij: ' + opRij, w / 2, 318);
+  meter.userData.tex.needsUpdate = true;
+}
+// ---------- Vonken (één Points-systeem voor alle effecten) ----------
+const MAXV = 500;
+const vonkGeo = new THREE.BufferGeometry();
+vonkGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXV * 3).fill(-999), 3));
+vonkGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(MAXV * 3), 3));
+const vonkPts = new THREE.Points(vonkGeo, new THREE.PointsMaterial({ size: 0.045, map: gloedTex, vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+vonkPts.frustumCulled = false; vonkPts.renderOrder = 5; wereld.add(vonkPts);
+const vonken = []; let vonkNr = 0;
+for (let i = 0; i < MAXV; i++) vonken.push({ p: new THREE.Vector3(), v: new THREE.Vector3(), leven: 0, max: 1, c: new THREE.Color(), zw: 0 });
+function vonk(pos, kleur, n, snel, leven, zwaarte = 0, spreiding = 0) {
+  const c = new THREE.Color(kleur);
+  for (let i = 0; i < n; i++) {
+    const s = vonken[vonkNr]; vonkNr = (vonkNr + 1) % MAXV;
+    s.p.copy(pos); if (spreiding) s.p.add(new THREE.Vector3((Math.random() - 0.5) * spreiding, (Math.random() - 0.5) * spreiding, (Math.random() - 0.5) * spreiding));
+    s.v.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize().multiplyScalar(snel * (0.4 + Math.random() * 0.6));
+    s.leven = s.max = leven * (0.6 + Math.random() * 0.4); s.c.copy(c); s.zw = zwaarte;
+  }
+}
+function updateVonken(dt) {
+  const pa = vonkGeo.attributes.position.array, ca = vonkGeo.attributes.color.array;
+  for (let i = 0; i < MAXV; i++) {
+    const s = vonken[i];
+    if (s.leven <= 0) { if (pa[i * 3 + 1] !== -999) { pa[i * 3 + 1] = -999; } continue; }
+    s.leven -= dt; s.v.y -= s.zw * dt; s.v.multiplyScalar(1 - dt * 1.5); s.p.addScaledVector(s.v, dt);
+    const f = Math.max(0, s.leven / s.max);
+    pa[i * 3] = s.p.x; pa[i * 3 + 1] = s.p.y; pa[i * 3 + 2] = s.p.z;
+    ca[i * 3] = s.c.r * f; ca[i * 3 + 1] = s.c.g * f; ca[i * 3 + 2] = s.c.b * f;
+  }
+  vonkGeo.attributes.position.needsUpdate = true; vonkGeo.attributes.color.needsUpdate = true;
+}
+// ---------- Energiebol en meteoriet ----------
+const bolKern = new THREE.MeshBasicMaterial({ color: 0xd8f6ff });
+const bolSchil = new THREE.MeshBasicMaterial({ color: K.blauw, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false });
+const bolRing = new THREE.MeshBasicMaterial({ color: K.geel });
+const ringGeo = new THREE.TorusGeometry(0.115, 0.007, 6, 32);
+function maakBol() {
+  const g = new THREE.Group();
+  const kern = new THREE.Mesh(G.bol, bolKern); kern.scale.setScalar(0.07); g.add(kern);
+  const schil = new THREE.Mesh(G.bol, bolSchil); schil.scale.setScalar(0.095); g.add(schil);
+  const r1 = new THREE.Mesh(ringGeo, bolRing), r2 = new THREE.Mesh(ringGeo, bolRing); r2.rotation.x = Math.PI / 2; g.add(r1, r2);
+  g.add(halo(K.blauw, 0.42, 0.9));
+  g.userData = { soort: 'vang', ringen: [r1, r2], spoor: 0x43BFFD };
+  return g;
+}
+const steenGeo = (() => {
+  const g = new THREE.IcosahedronGeometry(0.1, 1), p = g.attributes.position, v = new THREE.Vector3(), cache = {};
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i); const sl = v.toArray().map(x => x.toFixed(3)).join();
+    const f = cache[sl] ?? (cache[sl] = 0.8 + Math.random() * 0.4); v.multiplyScalar(f); p.setXYZ(i, v.x, v.y, v.z);
+  }
+  g.computeVertexNormals(); return g;
+})();
+const steenMat = new THREE.MeshToonMaterial({ color: 0x7a3020, emissive: 0xff2a00, emissiveIntensity: 0.35, gradientMap: toonGrad });
+function maakMeteoriet() {
+  const g = new THREE.Group();
+  const steen = new THREE.Mesh(steenGeo, steenMat); steen.scale.setScalar(1.15); g.add(steen);
+  g.add(halo(0xff3b1f, 0.5, 0.95));
+  g.userData = { soort: 'rood', steen, spoor: 0xff7a1a, draai: new THREE.Vector3(Math.random() * 4, Math.random() * 4, Math.random() * 4) };
+  return g;
+}
+const uitloop = [];   // bollen die na afloop nog even doorvliegen of verdwijnen
+function updateUitloop(dt) {
+  for (let i = uitloop.length - 1; i >= 0; i--) {
+    const u = uitloop[i]; u.t += dt;
+    if (u.naar) { u.obj.position.lerp(u.naar, Math.min(1, dt * 14)); u.obj.scale.setScalar(Math.max(0.01, 1 - u.t / 0.25)); }
+    else { u.obj.position.addScaledVector(u.v, dt); u.obj.scale.setScalar(Math.max(0.01, 1 - u.t / 0.8)); }
+    if (u.t > (u.naar ? 0.25 : 0.8)) { wereld.remove(u.obj); uitloop.splice(i, 1); }
+  }
+}
+// ---------- Geluid ----------
+let audio = null;
+const STIL = VB.has('stil');
+function toon(freq, duur = 0.15, vertraging = 0, vol = 0.22, type = 'sine', naar = null) {
+  if (!audio || STIL) return;
+  const t0 = audio.currentTime + vertraging, o = audio.createOscillator(), gn = audio.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0); if (naar) o.frequency.exponentialRampToValueAtTime(naar, t0 + duur);
+  gn.gain.setValueAtTime(vol, t0); gn.gain.exponentialRampToValueAtTime(0.001, t0 + duur);
+  o.connect(gn).connect(audio.destination); o.start(t0); o.stop(t0 + duur + 0.02);
+}
+function ruis(duur, van, naar, vol = 0.25) {
+  if (!audio || STIL) return;
+  const buf = audio.createBuffer(1, Math.floor(audio.sampleRate * duur), audio.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const s = audio.createBufferSource(); s.buffer = buf;
+  const f = audio.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 2; const t0 = audio.currentTime;
+  f.frequency.setValueAtTime(van, t0); f.frequency.exponentialRampToValueAtTime(naar, t0 + duur);
+  const gn = audio.createGain(); gn.gain.setValueAtTime(0.001, t0); gn.gain.linearRampToValueAtTime(vol, t0 + duur * 0.3); gn.gain.exponentialRampToValueAtTime(0.001, t0 + duur);
+  s.connect(f).connect(gn).connect(audio.destination); s.start(t0);
+}
+const geluid = {
+  wolk: () => { toon(880, 0.07, 0, 0.12); toon(1320, 0.09, 0.06, 0.08); },
+  schiet: () => toon(900, 0.2, 0, 0.12, 'triangle', 300),
+  schietRood: () => { toon(320, 0.35, 0, 0.12, 'sawtooth', 110); },
+  vang: () => { toon(880, 0.08); toon(1320, 0.12, 0.06); toon(1760, 0.16, 0.12, 0.12); },
+  mis: () => toon(260, 0.3, 0, 0.14),
+  ontweken: () => ruis(0.45, 3000, 400, 0.3),
+  geraakt: () => { toon(130, 0.25, 0, 0.4, 'square'); toon(80, 0.3, 0.04, 0.3); ruis(0.3, 800, 200, 0.3); },
+  finish: () => { [523, 659, 784, 1047, 1319].forEach((f, i) => toon(f, 0.28, i * 0.12)); }
+};
+// ---------- Handen (handschoenen) ----------
+const GEWRICHTEN = ['wrist'], BOTTEN = [];
+for (const v of ['thumb', 'index-finger', 'middle-finger', 'ring-finger', 'pinky-finger']) {
+  let vorige = 'wrist';
+  for (const d of (v === 'thumb' ? ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'] : ['metacarpal', 'phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip'])) {
+    const n = `${v}-${d}`; GEWRICHTEN.push(n); BOTTEN.push([vorige, n]); vorige = n;
+  }
+}
+const kogelGeo = new THREE.SphereGeometry(1, 10, 8), kootGeo = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
+const handMat = new THREE.MeshToonMaterial({ color: 0xe8eef5, gradientMap: toonGrad, transparent: true, opacity: 0.88 });
+const manchetMat = new THREE.MeshToonMaterial({ color: 0x662A88, gradientMap: toonGrad, transparent: true, opacity: 0.88 });
+const handVis = {};
+function handVisual(kant) {
+  if (handVis[kant]) return handVis[kant];
+  const g = new THREE.Group(); scene.add(g);
+  const kogels = {}; for (const n of GEWRICHTEN) { const m = new THREE.Mesh(kogelGeo, handMat); g.add(m); kogels[n] = m; }
+  const koten = BOTTEN.map(([a, b]) => { const m = new THREE.Mesh(kootGeo, handMat); m.userData.bot = [a, b]; g.add(m); return m; });
+  const palm = new THREE.Mesh(kogelGeo, handMat); g.add(palm);
+  const manchet = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.04, 0.07, 12), manchetMat); g.add(manchet);
+  const gloed = halo(K.blauw, 0.2, 0); g.add(gloed);
+  return (handVis[kant] = { g, kogels, koten, palm, manchet, gloed });
+}
+const _hv = { d: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3(), m: new THREE.Matrix4() };
+function tekenHand(vis, pos) {
+  for (const n of GEWRICHTEN) { const m = vis.kogels[n]; if (pos[n] && !n.endsWith('metacarpal')) { m.visible = true; m.position.copy(pos[n]); m.scale.setScalar(Math.max(0.006, pos[n].r * 1.05)); } else m.visible = false; }
+  for (const m of vis.koten) {
+    const [a, b] = m.userData.bot, pa = pos[a], pb = pos[b];
+    if (!pa || !pb || (a === 'wrist' && !b.startsWith('thumb'))) { m.visible = false; continue; }
+    m.visible = true; _hv.d.subVectors(pb, pa); const len = _hv.d.length();
+    m.position.copy(pa).addScaledVector(_hv.d, 0.5); m.quaternion.setFromUnitVectors(_yAs, _hv.d.normalize());
+    const r = Math.max(0.006, Math.min(pa.r, pb.r)); m.scale.set(r, len, r);
+  }
+  const w = pos.wrist, mi = pos['middle-finger-phalanx-proximal'] || pos['middle-finger-metacarpal'], ix = pos['index-finger-phalanx-proximal'], pk = pos['pinky-finger-phalanx-proximal'];
+  if (w && mi && ix && pk) {
+    _hv.y.subVectors(mi, w); const len = _hv.y.length(); _hv.y.normalize();
+    _hv.x.subVectors(pk, ix); const br = _hv.x.length(); _hv.x.addScaledVector(_hv.y, -_hv.x.dot(_hv.y)).normalize();
+    _hv.z.crossVectors(_hv.x, _hv.y).normalize();
+    vis.palm.visible = true; vis.palm.position.copy(w).addScaledVector(_hv.y, len * 0.55);
+    vis.palm.quaternion.setFromRotationMatrix(_hv.m.makeBasis(_hv.x, _hv.y, _hv.z)); vis.palm.scale.set(Math.max(0.03, br * 0.62), len * 0.6, 0.016);
+    vis.manchet.visible = true; vis.manchet.position.copy(w).addScaledVector(_hv.y, -0.03); vis.manchet.quaternion.copy(vis.palm.quaternion);
+  } else vis.palm.visible = vis.manchet.visible = false;
+}
+// geeft per hand (wereldcoördinaten): palm (midden handpalm), tips (vingertoppen), pols
+function updateHanden(frame, ref) {
+  const info = {}, gezien = new Set();
+  for (const bron of frame.session.inputSources) {
+    const kant = bron.handedness || 'none';
+    if (bron.hand) {
+      const pos = {};
+      for (const n of GEWRICHTEN) {
+        const j = bron.hand.get(n), jp = j && frame.getJointPose(j, ref);
+        if (!jp) continue;
+        const t = jp.transform.position; pos[n] = new THREE.Vector3(t.x, t.y, t.z); pos[n].r = jp.radius || 0.008;
+      }
+      if (!pos.wrist || !pos['index-finger-tip']) continue;
+      gezien.add(kant);
+      const vis = handVisual(kant); vis.g.visible = true; tekenHand(vis, pos);
+      const mid = pos['middle-finger-phalanx-proximal'] || pos['index-finger-phalanx-proximal'] || pos['index-finger-tip'];
+      const palm = pos.wrist.clone().lerp(mid, 0.6);
+      vis.gloed.position.copy(palm);
+      info[kant] = { palm, tips: ['index-finger-tip', 'middle-finger-tip', 'ring-finger-tip'].map(n => pos[n]).filter(Boolean), tip: pos['index-finger-tip'], pols: pos.wrist };
+    } else if (bron.gripSpace) {
+      const gp = frame.getPose(bron.gripSpace, ref);
+      if (gp && !gp.emulatedPosition) {
+        const t = gp.transform.position, p = new THREE.Vector3(t.x, t.y, t.z);
+        info[kant] = { palm: p, tips: [], pols: p };
+      }
+    }
+  }
+  for (const k in handVis) if (!gezien.has(k)) handVis[k].g.visible = false;
+  return info;
+}
+// nep-handen (voor de voorbeeldweergave en simulaties zonder headset)
+const nepVis = { left: new THREE.Mesh(G.bol, tm('#e8eef5')), right: new THREE.Mesh(G.bol, tm('#e8eef5')) };
+for (const k in nepVis) { nepVis[k].scale.setScalar(0.045); nepVis[k].visible = false; scene.add(nepVis[k]); }
+let nepHanden = null;   // { left: { palm: V3 }, right: {...} } in wereldcoördinaten
+function leesNepHanden() {
+  const info = {};
+  for (const k of ['left', 'right']) {
+    const h = nepHanden && nepHanden[k];
+    nepVis[k].visible = !!h && !!VB.has('voorbeeld');
+    if (!h) continue;
+    nepVis[k].position.copy(h.palm);
+    info[k] = { palm: h.palm.clone(), tips: [], pols: h.palm.clone() };
+  }
+  return info;
+}
+
+// ---------- Zwevend menu na een level ----------
+const menu = new THREE.Group(); menu.visible = false; scene.add(menu);
+function knopTekenen(k) {
+  const u = k.userData, c = u.canvas.getContext('2d'), w = u.canvas.width, h = u.canvas.height;
+  c.clearRect(0, 0, w, h);
+  c.fillStyle = u.uit ? '#4a4f57' : u.hover ? u.kleurAan : u.kleur; c.beginPath(); c.roundRect(6, 6, w - 12, h - 12, 34); c.fill();
+  c.strokeStyle = u.hover ? '#F6F01D' : '#ffffff'; c.lineWidth = u.hover ? 14 : 8; c.stroke();
+  c.fillStyle = '#ffffff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  pasLetter(c, u.tekst, w - 50, u.sub ? 60 : 64); c.fillText(u.tekst, w / 2, u.sub ? h * 0.38 : h / 2 + 2);
+  if (u.sub) { pasLetter(c, u.sub, w - 50, 40, 20, 'normal'); c.fillText(u.sub, w / 2, h * 0.72); }
+  u.tex.needsUpdate = true;
+}
+function maakKnop(id, x, y, bw, bh, kleur, kleurAan) {
+  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = Math.round(512 * bh / bw);
+  const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(bw, bh), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.position.set(x, y, 0); m.renderOrder = 12;
+  m.userData = { id, w: bw, h: bh, canvas, tex, kleur, kleurAan, tekst: '', sub: '', hover: false, uit: false };
+  menu.add(m); return m;
+}
+const knoppen = [
+  maakKnop('opnieuw', -0.17, 0, 0.3, 0.13, '#215C9A', '#2f7bd0'),
+  maakKnop('volgende', 0.17, 0, 0.3, 0.13, '#2e8b57', '#3cb371'),
+  maakKnop('stop', 0, -0.13, 0.2, 0.07, '#662A88', '#8a3cb5')
+];
+let menuT = 0, selectBronnen = [], menuKeuze = null;
+const _ray = new THREE.Raycaster();
+function speelbaar(nr) { return !!(LEVELS[nr - 1] && LEVELS[nr - 1].maak); }
+function toonMenu(p, q) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; if (f.lengthSq() < 1e-4) f.set(0, 0, -1); f.normalize();
+  menu.position.set(p.x + f.x * 0.48, p.y - 0.32, p.z + f.z * 0.48); menu.lookAt(p.x, p.y - 0.15, p.z);
+  const [kOpn, kVlg, kStop] = knoppen, vlg = LEVELS[LV.nr];
+  Object.assign(kOpn.userData, { tekst: 'Nog een keer', sub: `level ${LV.nr}`, uit: false });
+  Object.assign(kVlg.userData, vlg && speelbaar(vlg.nr) ? { tekst: 'Volgende ▶', sub: `level ${vlg.nr} · ${vlg.naam}`, uit: false } : { tekst: 'Volgende', sub: 'volgt nog', uit: true });
+  Object.assign(kStop.userData, { tekst: 'Stoppen', sub: '', uit: false });
+  knoppen.forEach(k => { k.userData.hover = false; knopTekenen(k); });
+  menu.visible = true; menuT = 0;
+}
+function updateMenu(handW, frame, ref, dt) {
+  if (!menu.visible) return null;
+  menuT += dt; menu.updateMatrixWorld(true);
+  const hover = new Set(); let gekozen = null;
+  for (const k of ['left', 'right']) {   // 1. aantikken met je wijsvinger
+    const tip = handW[k] && handW[k].tip; if (!tip) continue;
+    for (const kn of knoppen) {
+      const l = kn.worldToLocal(tip.clone()), u = kn.userData;
+      if (Math.abs(l.x) < u.w / 2 + 0.01 && Math.abs(l.y) < u.h / 2 + 0.01 && l.z < 0.08 && l.z > -0.1) { hover.add(kn); if (l.z < 0.012) gekozen = gekozen || kn; }
+    }
+  }
+  if (frame) for (const bron of frame.session.inputSources) {   // 2. aanwijzen met de straal, knijpen = kiezen
+    const rp = bron.targetRaySpace && frame.getPose(bron.targetRaySpace, ref); if (!rp) continue;
+    const t = rp.transform.position, o = rp.transform.orientation;
+    _ray.set(new THREE.Vector3(t.x, t.y, t.z), new THREE.Vector3(0, 0, -1).applyQuaternion(new THREE.Quaternion(o.x, o.y, o.z, o.w)));
+    const hit = _ray.intersectObjects(knoppen, false)[0];
+    if (hit) { hover.add(hit.object); if (selectBronnen.includes(bron)) gekozen = gekozen || hit.object; }
+  }
+  selectBronnen = [];
+  for (const kn of knoppen) { const h = hover.has(kn) && !kn.userData.uit; if (h !== kn.userData.hover) { kn.userData.hover = h; knopTekenen(kn); } }
+  if (menuKeuze) { const id = menuKeuze; menuKeuze = null; return id; }   // testhaak
+  if (menuT < 1 || !gekozen || gekozen.userData.uit) return null;   // eerste seconde telt niet
+  return gekozen.userData.id;
+}
+// ---------- Medaille bij de finish ----------
+const medaille = (() => {
+  const vorm = new THREE.Shape();
+  for (let i = 0; i < 10; i++) { const a = Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 0.042 : 0.1; const x = Math.cos(a) * r, y = Math.sin(a) * r; i ? vorm.lineTo(x, y) : vorm.moveTo(x, y); }
+  const geo = new THREE.ExtrudeGeometry(vorm, { depth: 0.018, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.008, bevelSegments: 2 }); geo.center();
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geo, tm('#F6C21D')));
+  g.add(halo(K.geel, 0.5, 0.7));
+  g.visible = false; wereld.add(g); return g;
+})();
+
+// ---------- Status ----------
+let vorigeT = null, tijd = 0, fase = 'opstellen', faseT = 0;
+let base = null, stilT = 0, ankerP = null;
+let resultaten = [], log = [], gebeurtenissen = [], levelsGespeeld = [];
+let reeksOpRij = 0, zitT = 0, staT = 0, pauzeVan = null, warmupAan = true;
+let script = [], sIdx = 0, sT = 0, scriptKlaar = null, meting = null, handenT = 0;
+const spel = { i: 0, staat: 'wacht', t: 0, schot: null, obj: null };
+function gebeurtenis(type, extra = {}) { gebeurtenissen.push({ t: +tijd.toFixed(2), type, ...extra }); }
+const cm = x => Math.round(x * 100) + ' cm';
+const kies = a => a[Math.floor(Math.random() * a.length)];
+
+function zetBase(p, q) {
+  const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+  const vooruit = new THREE.Vector2(f.x, f.z); if (vooruit.lengthSq() < 1e-4) vooruit.set(0, -1); vooruit.normalize();
+  base = { x: p.x, z: p.z, y: p.y };
+  wereld.position.set(p.x, 0, p.z); wereld.rotation.y = Math.atan2(-vooruit.x, -vooruit.y); wereld.visible = true;
+  wereld.updateMatrixWorld(true);
+  bliep.position.set(D.bliep[0], Math.max(1.0, p.y + D.bliep[1]), D.bliep[2]);
+  meter.position.set(0.52, Math.max(0.6, p.y - 0.62), -0.78); meter.lookAt(wereld.localToWorld(new THREE.Vector3(0, p.y, 0)));
+  gebeurtenis('opgesteld', { y: +p.y.toFixed(3) });
+}
+// ---------- Uitleg, warming-up en meting (als script van stappen) ----------
+const METING = [
+  { tekst: m => 'Reik met je linkerhand zo ver je kunt naar links' + (m.reikL > 0.1 ? ` · ${cm(m.reikL)}` : ''), gebaar: 'reikL', meet: 'reikL', duur: 5 },
+  { tekst: m => 'Nu met je rechterhand naar rechts' + (m.reikR > 0.1 ? ` · ${cm(m.reikR)}` : ''), gebaar: 'reikR', meet: 'reikR', duur: 5 },
+  { tekst: () => 'Reik zo hoog als je kunt', gebaar: 'omhoog', meet: 'hoog', duur: 4.5 },
+  { tekst: () => 'Zak door je knieën, zo ver als fijn voelt', gebaar: 'buk', meet: 'buk', duur: 4.5 },
+  { tekst: () => 'Mooi! Weer rechtop staan', gebaar: 'juich', duur: 2, eindMeting: true }
+];
+const WARMUP = [
+  { tekst: () => 'Hoi! Ik ben Bliep. Jij bent de keeper van ons ruimtestation', gebaar: 'zwaai', duur: 4.5 },
+  { tekst: () => 'Laat je handen zien: steek ze naar voren', gebaar: 'vang', wachtHanden: true, duur: 8 },
+  { tekst: () => 'Eerst meet ik hoe ver je kunt reiken. Je voeten blijven staan', gebaar: 'rust', duur: 4 },
+  ...METING,
+  { tekst: () => 'Door de poort komen energiebollen. Vang ze met je hand!', gebaar: 'vang', duur: 4.5 },
+  { tekst: () => 'Gaat het twee keer goed? Dan wordt het iets moeilijker', gebaar: 'wijs', duur: 4 },
+  { tekst: () => 'Moe? Ga even zitten, dan wacht ik', gebaar: 'rust', duur: 4 },
+  { tekst: () => 'Klaar? Daar komt de eerste!', gebaar: 'juich', duur: 2.5 }
+];
+function introScript() {
+  const s = [];
+  if (warmupAan) s.push(...WARMUP);
+  else if (!kal) s.push({ tekst: () => 'Eerst een korte meting: hoe ver kun je reiken?', gebaar: 'rust', duur: 3 }, ...METING);
+  if (!warmupAan || LV.nr > 1) s.push({ tekst: () => LV.intro, gebaar: 'juich', duur: 3.5 });
+  if (LV.nr === 3) s.push({ tekst: () => 'Blauw = vangen. Rood = niet aanraken!', gebaar: 'duik', duur: 4 });
+  return s;
+}
+function startScript(stappen, daarna) {
+  script = stappen; sIdx = 0; sT = 0; scriptKlaar = daarna; fase = 'script'; faseT = 0; handenT = 0;
+  if (stappen.some(s => s.meet)) meting = { reikL: 0, reikR: 0, hoog: -9, buk: 0, handen: false };
+  startStap();
+}
+function startStap() {
+  const s = script[sIdx]; if (!s) return;
+  bliep.userData.gebaar = s.gebaar || 'rust'; sT = 0; handenT = 0;
+  zetWolk(s.tekst(meting || {}));
+  gebeurtenis('uitleg', { stap: sIdx, meet: s.meet || null });
+}
+function volgendeStap() {
+  const s = script[sIdx];
+  if (s && s.eindMeting) rondMetingAf();
+  sIdx++;
+  if (sIdx >= script.length) { const f = scriptKlaar; scriptKlaar = null; f && f(); return; }
+  startStap();
+}
+function rondMetingAf() {
+  const m = meting || {}, h = base.y;
+  const ok = (v, lo, hi) => v >= lo && v <= hi;
+  kal = {
+    reikL: ok(m.reikL, 0.3, 1.3) ? +m.reikL.toFixed(3) : STANDAARD.reikL,
+    reikR: ok(m.reikR, 0.3, 1.3) ? +m.reikR.toFixed(3) : STANDAARD.reikR,
+    hoog: ok(m.hoog - h, 0.12, 0.9) ? +(m.hoog - h).toFixed(3) : STANDAARD.hoog,
+    buk: ok(m.buk, 0.08, 0.8) ? +m.buk.toFixed(3) : STANDAARD.buk,
+    gemeten: { reikL: +m.reikL.toFixed(3), reikR: +m.reikR.toFixed(3), hoog: +(m.hoog - h).toFixed(3), buk: +m.buk.toFixed(3), handenGezien: !!m.handen }
+  };
+  bouwDoel(Math.max(2.3, h + kal.hoog + 0.2));
+  gebeurtenis('meting', { ...kal });
+}
+function updateScript(dt, kopL, handL) {
+  const s = script[sIdx]; if (!s) return;
+  sT += dt;
+  const nHand = Object.keys(handL).length;
+  if (s.meet && meting) {
+    if (nHand) meting.handen = true;
+    for (const k in handL) {
+      const p = handL[k].palm;
+      if (s.meet === 'reikL') meting.reikL = Math.max(meting.reikL, -p.x);
+      if (s.meet === 'reikR') meting.reikR = Math.max(meting.reikR, p.x);
+      if (s.meet === 'hoog') meting.hoog = Math.max(meting.hoog, p.y);
+    }
+    if (s.meet === 'buk') meting.buk = Math.max(meting.buk, base.y - kopL.y);
+    if (s.meet.startsWith('reik') && Math.floor(sT * 4) !== Math.floor((sT - dt) * 4)) zetWolk(s.tekst(meting));
+  }
+  if (s.wachtHanden) {
+    handenT = nHand ? handenT + dt : 0;
+    if (handenT > 0.6) { zetWolk('Ik zie je handen!'); volgendeStap(); return; }
+    if (sT > s.duur) { zetWolk('Geen handen gezien. Leg je controllers weg'); script.splice(sIdx + 1, 0, { tekst: () => 'Geen handen? Dan tel ik het als je lijf voor de bol staat', gebaar: 'rust', duur: 4 }); volgendeStap(); return; }
+    return;
+  }
+  if (sT >= s.duur) volgendeStap();
+}
+// ---------- Het spel: schoten ----------
+function richtSchot(s, kopL) {
+  const h = base.y, n = niveau[s.vaardigheid] ?? 0, N = NIVEAU[s.vaardigheid], k0 = kal || STANDAARD;
+  const r = Math.random;
+  let x = 0, y = h - 0.35, z = D.doelZ, F = N.tijd[n];
+  if (s.zone === 'midden') { x = s.kant * N.treden[n]; y = h - 0.38 + (r() - 0.5) * 0.12; }
+  else if (s.zone === 'links' || s.zone === 'rechts') { const k = s.zone === 'links' ? -1 : 1; x = k * (k < 0 ? k0.reikL : k0.reikR) * N.treden[n]; y = h - 0.28 + (r() - 0.5) * 0.1; }
+  else if (s.zone === 'hoog') { const k = r() < 0.5 ? -1 : 1; x = k * (0.12 + r() * 0.15); y = h + k0.hoog * N.treden[n]; }
+  else if (s.zone === 'laag') { const k = r() < 0.5 ? -1 : 1; x = k * (0.15 + r() * 0.15); y = Math.max(0.35, h - k0.buk - 0.85, h * N.treden[n]); }
+  else if (s.soort === 'rood') { x = kopL.x; y = kopL.y; z = kopL.z; F = N.treden[n] + (s.eerste ? 0.5 : 0); }
+  x = THREE.MathUtils.clamp(x, -D.maxOpzij, D.maxOpzij);
+  const doelP = new THREE.Vector3(x, y, z);
+  const van = new THREE.Vector3(THREE.MathUtils.clamp(x * 0.4, -0.8, 0.8), THREE.MathUtils.clamp(1.75 + (y - 1.4) * 0.3, 1.45, 2.15), D.ufoZ - 0.05);
+  Object.assign(s, { van, doelP, F, niveau: n, waarde: N.treden[n], v: doelP.clone().sub(van).divideScalar(F) });
+}
+const NAMEN = { midden: 'Bol', links: 'Bol links', rechts: 'Bol rechts', hoog: 'Bol hoog', laag: 'Bol laag', hoofd: 'Meteoriet' };
+function startSpel() {
+  fase = 'spel'; faseT = 0; resultaten = []; reeksOpRij = 0;
+  Object.assign(spel, { i: 0, staat: 'wacht', t: 0.5, schot: null, obj: null });
+  bliep.userData.gebaar = 'rust';
+  gebeurtenis('level-start', { level: LV.nr, niveau: { ...niveau }, schoten: schoten.length });
+}
+function schatRest() {
+  let r = 0;
+  for (let i = spel.i + (spel.schot ? 1 : 0); i < schoten.length; i++) { const s = schoten[i]; r += D.aanloop + D.naSchot + NIVEAU[s.vaardigheid].tijd[niveau[s.vaardigheid] ?? 0] + (s.eerste ? 3 : 0); }
+  if (spel.schot) r += Math.max(0, (spel.staat === 'aanloop' ? D.aanloop + spel.schot.F : spel.staat === 'vlucht' ? spel.schot.F - spel.t : 0) + D.naSchot);
+  return r + 3;
+}
+function stopSchot() {   // bij pauze: bol weg, schot later opnieuw
+  if (spel.obj) { wereld.remove(spel.obj); spel.obj = null; }
+  ufo.userData.laad = 0; ufo.userData.vast = false;
+  if (spel.schot && spel.staat !== 'wacht') { spel.schot = null; spel.staat = 'wacht'; spel.t = -1; }
+}
+function rondAf(s, gelukt, detail, popTekst, popKleur) {
+  spel.staat = 'wacht'; spel.t = 0;
+  const reactie = s.reactie !== undefined ? +s.reactie.toFixed(2) : null;
+  const r = { nr: spel.i + 1, naam: NAMEN[s.zone], soort: s.soort, zone: s.zone, vaardigheid: s.vaardigheid, gelukt, reactie,
+    detail: { ...detail, vliegtijd: +s.F.toFixed(2), niveau: s.niveau + 1, doelOpzij: +s.doelP.x.toFixed(3), doelHoogte: +s.doelP.y.toFixed(3), dichtst: s.dichtst < 9 ? +s.dichtst.toFixed(3) : null } };
+  resultaten.push(r);
+  gebeurtenis(gelukt ? 'gelukt' : 'mislukt', { nr: r.nr, zone: s.zone, reactie, ...r.detail });
+  reeksOpRij = gelukt ? reeksOpRij + 1 : 0;
+  pasAan(s.vaardigheid, gelukt);
+  zetPopup(popTekst, popKleur, new THREE.Vector3(THREE.MathUtils.clamp(s.doelP.x, -0.8, 0.8), Math.max(0.9, Math.min(2.1, s.doelP.y + 0.2)), -1.1));
+  if (gelukt && reeksOpRij > 0 && reeksOpRij % 5 === 0) { zetWolk(`${reeksOpRij} op rij! Wat een keeper!`, '#F6F01D'); bliep.userData.gebaar = 'juich'; wolkUitT = tijd + 2.5; }
+  spel.i++; spel.schot = null;
+}
+let wolkUitT = 0;
+function updateSpel(dt, kopL, handL) {
+  spel.t += dt;
+  const u = ufo.userData;
+  if (spel.staat === 'wacht') {
+    if (spel.t < D.naSchot) return;
+    if (spel.i >= schoten.length) { startFinish(); return; }
+    const s = schoten[spel.i];
+    richtSchot(s, kopL); spel.schot = s; spel.staat = 'aanloop'; spel.t = 0;
+    s.extra = 0;
+    if (s.eerste) { zetWolk('Rood! Niet aanraken: duik weg of leun opzij', '#ff5a3c'); bliep.userData.gebaar = 'duik'; s.extra = 2.5; wolkUitT = tijd + 4.5; }
+    u.vast = true; u.doelX = s.van.x; u.doelY = s.van.y; u.kleur = s.soort === 'rood' ? 0xff3b1f : K.blauw;
+    return;
+  }
+  const s = spel.schot;
+  if (spel.staat === 'aanloop') {
+    u.laad = Math.min(1, spel.t / (D.aanloop + s.extra));
+    if (spel.t < D.aanloop + s.extra) return;
+    // schieten
+    u.laad = 0; u.vast = false;
+    if (s.soort === 'rood') { s.doelP.copy(kopL); s.v = s.doelP.clone().sub(s.van).divideScalar(s.F); }   // meteoriet mikt op waar je hoofd nú is
+    const obj =s.soort === 'rood' ? maakMeteoriet() : maakBol();
+    obj.position.copy(s.van); wereld.add(obj); spel.obj = obj;
+    spel.staat = 'vlucht'; spel.t = 0;
+    s.handStart = {}; for (const k in handL) s.handStart[k] = handL[k].palm.clone();
+    s.kopStart = kopL.clone(); s.dichtst = 99; s.handenGezien = false; s.reactie = undefined; s.maxUitwijk = 0;
+    vonk(s.van, s.soort === 'rood' ? 0xff5a1f : 0x8fe3ff, 18, 1.2, 0.5);
+    s.soort === 'rood' ? geluid.schietRood() : geluid.schiet();
+    gebeurtenis('schot', { nr: spel.i + 1, zone: s.zone, vliegtijd: +s.F.toFixed(2), niveau: s.niveau + 1, doel: s.doelP.toArray().map(v => +v.toFixed(3)) });
+    if (wolkUitT && tijd > wolkUitT) { zetWolk(null); wolkUitT = 0; bliep.userData.gebaar = 'rust'; }
+    return;
+  }
+  if (spel.staat !== 'vlucht') return;
+  const obj = spel.obj, O = obj.position;
+  O.copy(s.van).addScaledVector(s.v, spel.t);
+  // effecten onderweg
+  if (obj.userData.ringen) { obj.userData.ringen[0].rotation.y += dt * 6; obj.userData.ringen[1].rotation.x += dt * 5; }
+  if (obj.userData.steen) { const d = obj.userData.draai; obj.userData.steen.rotation.x += d.x * dt; obj.userData.steen.rotation.y += d.y * dt; }
+  if (O.z > -4.6) vonk(O, obj.userData.spoor, s.soort === 'rood' ? 2 : 1, 0.15, s.soort === 'rood' ? 0.45 : 0.3, 0, 0.05);
+  // handen
+  const nHand = Object.keys(handL).length; if (nHand) s.handenGezien = true;
+  let best = null, bestD = 99;
+  for (const k in handL) {
+    const h = handL[k]; let d = h.palm.distanceTo(O);
+    for (const tp of h.tips) d = Math.min(d, tp.distanceTo(O) + (D.vangAfst - D.tipAfst));
+    if (d < bestD) { bestD = d; best = k; }
+    if (s.reactie === undefined && s.handStart[k] && h.palm.distanceTo(s.handStart[k]) > D.reactieHand && s.soort === 'vang') s.reactie = spel.t;
+  }
+  if (O.z > D.vangVanaf) s.dichtst = Math.min(s.dichtst, bestD);
+  const uitwijk = Math.hypot(kopL.x - s.kopStart.x, kopL.y - s.kopStart.y);
+  s.maxUitwijk = Math.max(s.maxUitwijk, uitwijk);
+  if (s.soort === 'rood' && s.reactie === undefined && uitwijk > D.reactieHoofd) s.reactie = spel.t;
+  const passeert = O.z >= kopL.z;
+  if (s.soort === 'vang') {
+    if (O.z > D.vangVanaf && bestD < D.vangAfst) {
+      const hand = handL[best].palm;
+      if (s.zone !== 'midden') {   // reikte je verder dan gemeten? dan groeit je meting mee
+        const kk = hand.x < 0 ? 'reikL' : 'reikR', ver = Math.abs(hand.x);
+        if (kal && (s.zone === 'links' || s.zone === 'rechts') && ver > kal[kk] && ver < 1.3) { gebeurtenis('meting-bijgesteld', { [kk]: +ver.toFixed(3), was: kal[kk] }); kal[kk] = +ver.toFixed(3); }
+        if (kal && s.zone === 'hoog' && hand.y - base.y > kal.hoog && hand.y - base.y < 0.9) { gebeurtenis('meting-bijgesteld', { hoog: +(hand.y - base.y).toFixed(3), was: kal.hoog }); kal.hoog = +(hand.y - base.y).toFixed(3); }
+      }
+      uitloop.push({ obj, t: 0, naar: hand.clone() }); spel.obj = null;
+      vonk(O, 0x8fe3ff, 30, 1.6, 0.6); vonk(O, K.geel, 12, 1.0, 0.5);
+      const vis = handVis[best]; if (vis) vis.gloed.material.opacity = 1;
+      geluid.vang();
+      rondAf(s, true, { hand: best === 'left' ? 'links' : best === 'right' ? 'rechts' : best, hoe: 'hand', handOpzij: +hand.x.toFixed(3), handHoogte: +hand.y.toFixed(3), hoofdOpzij: +kopL.x.toFixed(3), hoofdDaal: +(base.y - kopL.y).toFixed(3) }, kies(['Gevangen!', 'Top!', 'Mooi gepakt!', 'Wat een redding!']), '#8fe3ff');
+      return;
+    }
+    if (!s.handenGezien && passeert) {   // geen handen in beeld: tel je lijf
+      const d = Math.hypot(O.x - kopL.x, O.y - kopL.y);
+      if (d < D.lichaamAfst) {
+        uitloop.push({ obj, t: 0, naar: kopL.clone().setY(kopL.y - 0.3) }); spel.obj = null; vonk(O, 0x8fe3ff, 24, 1.4, 0.5); geluid.vang();
+        rondAf(s, true, { hoe: 'lichaam', afstandHoofd: +d.toFixed(3), hoofdOpzij: +kopL.x.toFixed(3) }, 'Tegengehouden!', '#8fe3ff'); return;
+      }
+    }
+    if (O.z > kopL.z + 0.35) {
+      uitloop.push({ obj, t: 0, v: s.v.clone() }); spel.obj = null; geluid.mis();
+      rondAf(s, false, { hoe: s.handenGezien ? 'gemist' : 'geen handen', hoofdOpzij: +kopL.x.toFixed(3), hoofdDaal: +(base.y - kopL.y).toFixed(3) }, kies(['Net gemist', 'Bijna!', 'Volgende pak je!']), '#ffd0d0');
+    }
+    return;
+  }
+  // rode meteoriet
+  if (bestD < D.roodHand && O.z > D.vangVanaf) {
+    uitloop.push({ obj, t: 0, v: s.v.clone().multiplyScalar(0.3) }); spel.obj = null; vonk(O, 0xff5a1f, 30, 1.5, 0.6); geluid.geraakt();
+    rondAf(s, false, { hoe: 'aangeraakt', hand: best === 'left' ? 'links' : 'rechts', uitwijk: +s.maxUitwijk.toFixed(3) }, 'Rood niet aanraken!', '#ff8a6a'); return;
+  }
+  if (passeert) {
+    const d = Math.hypot(O.x - kopL.x, O.y - kopL.y);
+    if (d < D.roodRaak) {
+      uitloop.push({ obj, t: 0, v: s.v.clone().multiplyScalar(0.2) }); spel.obj = null; vonk(O, 0xff5a1f, 40, 1.8, 0.7); geluid.geraakt(); flitsT = tijd;
+      rondAf(s, false, { hoe: 'geraakt', afstandHoofd: +d.toFixed(3), uitwijk: +s.maxUitwijk.toFixed(3), hoofdDaal: +(base.y - kopL.y).toFixed(3) }, 'Au! Duik weg!', '#ff8a6a');
+    } else {
+      uitloop.push({ obj, t: 0, v: s.v.clone() }); spel.obj = null; geluid.ontweken();
+      rondAf(s, true, { hoe: 'ontweken', afstandHoofd: +d.toFixed(3), uitwijk: +s.maxUitwijk.toFixed(3), hoofdOpzij: +(kopL.x - s.kopStart.x).toFixed(3), hoofdDaal: +(base.y - kopL.y).toFixed(3) }, kies(['Ontweken!', 'Mooi weggedoken!', 'Net op tijd!']), '#5ee08a');
+    }
+  }
+}
+// rode flits als een meteoriet je raakt
+const flits = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2a00, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false }));
+flits.renderOrder = 20; scene.add(flits);
+let flitsT = -9;
+// ---------- Finish ----------
+let finishT = 0;
+function startFinish() {
+  fase = 'finish'; faseT = 0; finishT = 0;
+  const goed = resultaten.filter(r => r.gelukt).length;
+  levelsGespeeld.push({ level: LV.nr, goed, van: resultaten.length, resultaten: resultaten.slice(), niveau: { ...niveau } });
+  zetWolk(`Level ${LV.nr} klaar! ${goed} van de ${resultaten.length} goed`, '#F6F01D'); bliep.userData.gebaar = 'juich';
+  medaille.visible = true; medaille.position.set(0, base.y - 0.05, -1.0); medaille.scale.setScalar(0.01);
+  geluid.finish();
+  gebeurtenis('level-klaar', { level: LV.nr, goed, van: resultaten.length, niveau: { ...niveau } });
+}
+function kiesMenu(id) {
+  menu.visible = false; medaille.visible = false;
+  gebeurtenis('menu', { keuze: id });
+  if (id === 'stop') { if (sessie) sessie.end(); else { fase = 'einde'; } return; }
+  laadLevel(id === 'volgende' ? LV.nr + 1 : LV.nr);
+  warmupAan = false;
+  startScript(introScript(), startSpel);
+}
+// ---------- Hoofdlus ----------
+function update(p, q, frame, ref, dt) {
+  tijd += dt; faseT += dt;
+  const handW = frame ? updateHanden(frame, ref) : leesNepHanden();
+  const hp = new THREE.Vector3(p.x, p.y, p.z);
+  if (fase === 'opstellen') {
+    // wolkje 1,8 m voor je zolang je nog niet opgesteld bent
+    const f = new THREE.Vector3(0, 0, -1).applyQuaternion(q); f.y = 0; if (f.lengthSq() < 1e-4) f.set(0, 0, -1); f.normalize();
+    wolk.position.set(p.x + f.x * 1.8, p.y + 0.15, p.z + f.z * 1.8); wolk.lookAt(hp);
+    if (ankerP && hp.distanceTo(ankerP) < D.opstelMarge) stilT += dt; else { stilT = 0; ankerP = hp.clone(); }
+    if (stilT > D.opstelTijd) { zetBase(p, q); startScript(introScript(), startSpel); }
+    return;
+  }
+  wereld.updateMatrixWorld();
+  const kopL = wereld.worldToLocal(hp.clone());
+  const handL = {};
+  for (const k in handW) handL[k] = { palm: wereld.worldToLocal(handW[k].palm.clone()), tips: handW[k].tips.map(t => wereld.worldToLocal(t.clone())) };
+  // meetgegevens (30 Hz)
+  if (log.length < 40000 && (!log.length || tijd - log[log.length - 1][0] >= 0.033)) {
+    const hl = handL.left && handL.left.palm, hr = handL.right && handL.right.palm, r3 = v => v ? [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)] : ['', '', ''];
+    const o = spel.obj ? spel.obj.position : null;
+    log.push([+tijd.toFixed(3), +kopL.x.toFixed(4), +(-kopL.z).toFixed(4), +(base.y - kopL.y).toFixed(4), ...r3(hl), ...r3(hr), fase, spel.staat === 'vlucht' ? spel.i + 1 : '', ...r3(o)]);
+  }
+  // veiligheid: zitten = pauze (niet tijdens bukken bij de meting of bij een lage bol)
+  const daal = base.y - kopL.y;
+  const lageBol = spel.schot && spel.schot.zone === 'laag' || (resultaten.at(-1) && resultaten.at(-1).zone === 'laag' && spel.t < 1.5);
+  const bukStap = fase === 'script' && script[sIdx] && script[sIdx].meet === 'buk';
+  if (fase !== 'pauze' && fase !== 'einde' && fase !== 'menu' && !lageBol && !bukStap) {
+    zitT = daal > D.zitten ? zitT + dt : 0;
+    if (zitT > 1.0) { pauzeVan = fase; fase = 'pauze'; staT = 0; stopSchot(); zetWolk('Even rust. Sta op als je verder wilt', '#43BFFD'); bliep.userData.gebaar = 'rust'; gebeurtenis('pauze'); }
+  }
+  if (fase === 'pauze') {
+    staT = daal < D.opstaan ? staT + dt : 0;
+    if (staT > 1.0) {
+      fase = pauzeVan; gebeurtenis('verder'); zitT = 0;
+      if (fase === 'script') startStap(); else { zetWolk('Daar gaan we weer!'); wolkUitT = tijd + 2; spel.t = -1; }
+    }
+  } else if (fase === 'script') updateScript(dt, kopL, handL);
+  else if (fase === 'spel') updateSpel(dt, kopL, handL);
+  else if (fase === 'finish') {
+    finishT += dt;
+    medaille.scale.setScalar(Math.min(1, finishT * 2)); medaille.rotation.y += dt * 2;
+    if (Math.floor(finishT * 3) !== Math.floor((finishT - dt) * 3) && finishT < 3.5) {
+      const kl = [K.geel, K.roze, K.blauw, 0x5ee08a];
+      vonk(new THREE.Vector3((Math.random() - 0.5) * 2.4, D.poortY + 0.4 + Math.random() * 0.9, D.poortZ + 0.4), kies(kl), 50, 2.2, 1.2, 1.5);
+    }
+    if (finishT > 4) { fase = 'menu'; toonMenu(p, q); }
+  } else if (fase === 'menu') {
+    medaille.rotation.y += dt * 2;
+    const id = updateMenu(handW, frame, ref, dt);
+    if (id) kiesMenu(id);
+  }
+  // beeld bijwerken
+  updateUfo(dt, tijd);
+  updateBliep(dt, tijd, kopL);
+  updateVonken(dt); updateUitloop(dt);
+  for (const k in handVis) handVis[k].gloed.material.opacity = Math.max(0, handVis[k].gloed.material.opacity - dt * 2.5);
+  ruimte.userData.station.rotation.z += dt * 0.05;
+  poort.userData.gloed.material.opacity = 0.75 + Math.sin(tijd * 2) * 0.25;
+  // wolk boven Bliep, iets naar het midden, naar je ogen gedraaid
+  wolk.position.copy(wereld.localToWorld(new THREE.Vector3(bliep.position.x + 0.3, bliep.position.y + 0.5, bliep.position.z)));
+  wolk.lookAt(hp);
+  if (tijd - nivT < 2.8) { nivBord.visible = true; nivBord.position.copy(wolk.position); nivBord.position.y -= 0.24; nivBord.quaternion.copy(wolk.quaternion); } else nivBord.visible = false;
+  if (popup.visible) { const a = tijd - popupT; popup.position.y = popup.userData.y0 + a * 0.12; popup.material.opacity = Math.max(0, 1 - Math.max(0, a - 0.7) / 0.5); popup.lookAt(hp); if (a > 1.2) popup.visible = false; }
+  const fa = tijd - flitsT; flits.material.opacity = fa < 0.4 ? 0.35 * (1 - fa / 0.4) : 0; flits.position.copy(hp);
+  if (Math.floor(tijd * 4) !== Math.floor((tijd - dt) * 4)) {
+    const gehad = resultaten.length, goed = resultaten.filter(r => r.gelukt).length;
+    tekenMeter(goed, gehad, reeksOpRij);
+    const frac = fase === 'spel' ? spel.i / schoten.length : fase === 'finish' || fase === 'menu' ? 1 : 0;
+    tekenBord(frac, fase === 'spel' ? schatRest() : null);
+  }
+}
+
+// ---------- Simulatie-bot (voorbeeldweergave &bot en tests) ----------
+const bot = { kop: new THREE.Vector3(0, 1.67, 0), handen: { left: new THREE.Vector3(-0.25, 1.05, -0.25), right: new THREE.Vector3(0.25, 1.05, -0.25) }, misKans: 0.15, mis: false, schotNr: -1 };
+function botStap(dt) {
+  const B = new THREE.Vector3(0, 1.67, 0);
+  let kopDoel = B.clone(), doelL = new THREE.Vector3(-0.25, 1.05, -0.25), doelR = new THREE.Vector3(0.25, 1.05, -0.25);
+  const naar = (v, d, snel) => { const s = d.clone().sub(v), l = s.length(), m = snel * dt; if (l > m) v.addScaledVector(s, m / l); else v.copy(d); };
+  if (fase === 'script' && script[sIdx]) {
+    const m = script[sIdx].meet;
+    if (m === 'reikL') { doelL.set(-0.78, 1.45, -0.15); kopDoel.x = -0.08; }
+    if (m === 'reikR') { doelR.set(0.8, 1.45, -0.15); kopDoel.x = 0.08; }
+    if (m === 'hoog') doelR.set(0.15, 2.15, -0.2);
+    if (m === 'buk') kopDoel.y = 1.67 - 0.32;
+    if (script[sIdx].wachtHanden) { doelL.set(-0.2, 1.3, -0.4); doelR.set(0.2, 1.3, -0.4); }
+  }
+  const s = spel.schot;
+  if (s && spel.i !== bot.schotNr) { bot.schotNr = spel.i; bot.mis = Math.random() < bot.misKans; }
+  if (fase === 'spel' && s && (spel.staat === 'vlucht' || spel.staat === 'aanloop') && s.doelP) {
+    if (s.soort === 'rood') { if (!bot.mis && spel.staat === 'vlucht' && spel.obj && spel.obj.position.z > -3.5) kopDoel.x = 0.32; }
+    else {
+      const T = s.doelP.clone(); if (bot.mis) T.x += T.x < 0 ? 0.45 : -0.45;
+      if (s.zone === 'laag') kopDoel.y = Math.min(1.67, T.y + 0.75);
+      if (s.zone === 'links' || s.zone === 'rechts') kopDoel.x = THREE.MathUtils.clamp(T.x * 0.3, -0.25, 0.25);
+      const doelH = spel.obj && spel.obj.position.z > -1.6 ? spel.obj.position.clone() : T.clone().setZ(-0.35);
+      if (bot.mis) doelH.x += doelH.x < 0 ? 0.45 : -0.45;
+      if (T.x < 0) doelL.copy(doelH); else doelR.copy(doelH);
+    }
+  }
+  naar(bot.kop, kopDoel, 1.2); naar(bot.handen.left, doelL, 2.2); naar(bot.handen.right, doelR, 2.2);
+  const w = v => wereld.visible ? wereld.localToWorld(v.clone()) : v.clone();
+  nepHanden = { left: { palm: w(bot.handen.left) }, right: { palm: w(bot.handen.right) } };
+  return w(bot.kop);
+}
+
+// ---------- Voorbeeldweergave in de gewone browser ----------
+let vbT = null;
+function voorbeeld(t) {
+  const dt = vbT === null ? 0 : Math.min(0.1, (t - vbT) / 1000); vbT = t;
+  const q0 = new THREE.Quaternion();
+  if (!base) {
+    Object.assign(renderer.domElement.style, { display: 'block', position: 'fixed', inset: '0', zIndex: 99 });
+    scene.background = new THREE.Color(0x8a8f96);
+    camera.aspect = innerWidth / innerHeight; camera.fov = 75; camera.updateProjectionMatrix();
+    camera.position.set(0, 1.67, 0);
+    kal = { ...STANDAARD };
+    const o = VB.get('opdr') || 'vang';
+    const lv = { vang: 1, links: 2, rechts: 2, hoog: 3, laag: 3, rood: 3, uitleg: 1, finish: 1, menu: 1 }[o] || 1;
+    laadLevel(lv); toonTijd = true;
+    zetBase({ x: 0, y: 1.67, z: 0 }, q0); fase = 'spel';
+    const maak = { vang: () => vang('midden', { kant: 1 }), links: () => vang('links'), rechts: () => vang('rechts'), hoog: () => vang('hoog'), laag: () => vang('laag'), rood: () => rood() }[o];
+    if (maak) { schoten = Array.from({ length: 60 }, maak); startSpel(); }
+    if (o === 'uitleg') { warmupAan = true; startScript(introScript(), startSpel); }
+    if (o === 'finish' || o === 'menu') { resultaten = [{ gelukt: true }, { gelukt: true }, { gelukt: false }]; startFinish(); if (o === 'menu') finishT = 3.9; }
+    if (VB.has('derde')) { camera.position.set(2.4, 2.2, 1.6); camera.lookAt(-0.2, 1.3, -2.6); }
+    if (VB.has('cam')) { const c = VB.get('cam').split(',').map(Number); camera.position.set(c[0], c[1], c[2]); camera.lookAt(c[3], c[4], c[5]); if (c[6]) { camera.fov = c[6]; camera.updateProjectionMatrix(); } }
+    if (VB.has('t')) { const n = +VB.get('t') * 30; bot.misKans = 0; for (let i = 0; i < n; i++) { const kp = botStap(1 / 30); update(kp, q0, null, null, 1 / 30); } }
+  }
+  const kp = VB.has('bot') || VB.has('t') ? botStap(dt) : new THREE.Vector3(0, 1.67, 0);
+  if (VB.has('vries')) return renderer.render(scene, camera);
+  update(kp, q0, null, null, dt);
+}
+renderer.setAnimationLoop((t, frame) => {
+  if (!frame && VB.has('voorbeeld')) voorbeeld(t);
+  if (frame) {
+    const ref = renderer.xr.getReferenceSpace();
+    const pose = frame.getViewerPose(ref);
+    if (pose) {
+      const dt = vorigeT === null ? 0 : Math.min((t - vorigeT) / 1000, 0.1); vorigeT = t;
+      const o = pose.transform.orientation;
+      update(pose.transform.position, new THREE.Quaternion(o.x, o.y, o.z, o.w), frame, ref, dt);
+    }
+  }
+  renderer.render(scene, camera);
+});
+
+// ---------- Pagina ----------
+function detailTekst(r) {
+  const d = r.detail || {};
+  const delen = [];
+  if (d.hoe === 'hand') delen.push(`${d.hand}e hand op ${cm(Math.abs(d.handOpzij))} opzij, ${cm(d.handHoogte)} hoog`);
+  else if (d.hoe === 'lichaam') delen.push(`met je lijf (${cm(d.afstandHoofd)} van je hoofd)`);
+  else if (d.hoe === 'ontweken' || d.hoe === 'geraakt') delen.push(`${d.hoe} · ${cm(d.uitwijk)} uitgeweken`);
+  else if (d.hoe === 'aangeraakt') delen.push(`aangeraakt met ${d.hand}e hand`);
+  else if (d.hoe) delen.push(d.hoe + (d.dichtst !== null && d.dichtst !== undefined ? ` · hand ${cm(d.dichtst)} ervan` : ''));
+  if (r.soort === 'vang') delen.push(`doel ${cm(Math.abs(d.doelOpzij))} opzij, ${cm(d.doelHoogte)} hoog`);
+  delen.push(`${d.vliegtijd} s · niveau ${d.niveau}`);
+  return delen.join(' · ');
+}
+function toonResultaten() {
+  const el = document.getElementById('resultaten');
+  if (!levelsGespeeld.length && !resultaten.length) { el.innerHTML = ''; return; }
+  const lijst = levelsGespeeld.slice();
+  if (resultaten.length && fase === 'spel') lijst.push({ level: LV.nr, goed: resultaten.filter(r => r.gelukt).length, van: resultaten.length, resultaten, onaf: true });
+  el.innerHTML = (kal ? `<p>Meting: reiken links ${cm(kal.reikL)} · rechts ${cm(kal.reikR)} · omhoog ${cm(kal.hoog)} boven je ogen · bukken ${cm(kal.buk)}</p>` : '') +
+    lijst.map(l => `<p><b>Level ${l.level}: ${LEVELS[l.level - 1].naam}</b> · ${l.goed} van ${l.van} goed${l.onaf ? ' (niet afgemaakt)' : ''}</p>` +
+      `<table><tr><th>#</th><th>Onderdeel</th><th>Resultaat</th><th>Reactie</th><th>Details</th></tr>` +
+      l.resultaten.map(r => `<tr><td>${r.nr}</td><td>${r.naam}</td><td class="${r.gelukt ? 'ok' : 'nee'}">${r.gelukt ? '✓' : '✗'}</td><td>${r.reactie !== null ? r.reactie + ' s' : '–'}</td><td>${detailTekst(r)}</td></tr>`).join('') + `</table>`).join('');
+}
+const downloadKnop = document.getElementById('download');
+function meetData() {
+  return { app: 'iXbattle MR', versie: VERSIE, datum: new Date().toISOString(), instellingen: D, niveauTreden: NIVEAU, niveau, kalibratie: kal,
+    base: base && { y: +base.y.toFixed(3) }, kolommen: ['t', 'opzij', 'vooruit', 'daal', 'linksX', 'linksY', 'linksZ', 'rechtsX', 'rechtsY', 'rechtsZ', 'fase', 'schot', 'bolX', 'bolY', 'bolZ'],
+    frames: log, gebeurtenissen, levels: levelsGespeeld, resultaten };
+}
+downloadKnop.onclick = () => {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(meetData())], { type: 'application/json' }));
+  const d = new Date(), z = x => String(x).padStart(2, '0');
+  a.download = `ixbattle-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+};
+const startKnop = document.getElementById('start'), status = document.getElementById('status');
+const kiesLevel = document.getElementById('level'), levelInfo = document.getElementById('levelInfo');
+kiesLevel.innerHTML = LEVELS.map(l => `<option value="${l.nr}" ${l.maak ? '' : 'disabled'}>${l.nr}. ${l.naam}${l.maak ? '' : ' (volgt)'}</option>`).join('');
+const toonLevelInfo = () => { const l = LEVELS[kiesLevel.value - 1]; levelInfo.textContent = `Nieuw: ${l.nieuw}. ${l.maak().length} ballen, ongeveer ${l.nr === 1 ? '2' : '2,5'} minuten.`; };
+kiesLevel.onchange = () => { toonLevelInfo(); document.getElementById('optUitleg').checked = +kiesLevel.value === 1; }; toonLevelInfo();
+function nietBeschikbaar(t) { startKnop.textContent = 'Niet beschikbaar'; startKnop.disabled = true; status.textContent = t; }
+if (!('xr' in navigator)) nietBeschikbaar('Deze browser ondersteunt geen WebXR. Open deze pagina in de browser van de Meta Quest.');
+else navigator.xr.isSessionSupported('immersive-ar').then(ok => {
+  if (ok) { startKnop.disabled = false; startKnop.textContent = 'Start'; }
+  else nietBeschikbaar('Mixed reality wordt hier niet ondersteund. Open deze pagina in de browser van de Meta Quest.');
+}).catch(() => nietBeschikbaar('WebXR-controle mislukt.'));
+let sessie = null;
+function resetSpel() {
+  base = null; ankerP = null; stilT = 0; fase = 'opstellen'; faseT = 0; tijd = 0;
+  resultaten = []; log = []; gebeurtenissen = []; levelsGespeeld = []; reeksOpRij = 0; zitT = 0;
+  kal = null; niveau = {}; reeks = {}; laadLevel(+kiesLevel.value);
+  Object.assign(spel, { i: 0, staat: 'wacht', t: 0, schot: null, obj: null });
+  for (const u of uitloop) wereld.remove(u.obj); uitloop.length = 0;
+  menu.visible = false; medaille.visible = false; bouwDoel(2.3);
+  toonTijd = document.getElementById('optTijd').checked;
+  warmupAan = document.getElementById('optUitleg').checked;
+  zetWolk('Sta even stil en kijk recht vooruit');
+}
+startKnop.addEventListener('click', async () => {
+  try {
+    if (!audio) audio = new AudioContext();
+    sessie = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
+    sessie.addEventListener('select', (e) => { selectBronnen.push(e.inputSource); });
+    sessie.addEventListener('end', () => {
+      vorigeT = null; wereld.visible = false; zetWolk(null); stopSchot(); menu.visible = false; nivBord.visible = false;
+      for (const k in handVis) handVis[k].g.visible = false;
+      gebeurtenis('einde'); sessie = null;
+      startKnop.textContent = 'Opnieuw starten'; downloadKnop.hidden = log.length === 0;
+      status.textContent = levelsGespeeld.length || resultaten.length ? 'Resultaten:' : '';
+      toonResultaten(); fase = 'einde';
+    });
+    resetSpel(); toonResultaten(); downloadKnop.hidden = true;
+    await renderer.xr.setSession(sessie);
+    status.textContent = '';
+  } catch (e) { status.textContent = 'Starten mislukt: ' + e.message; }
+});
+// testhaak: simulaties zonder headset
+window.ixbattle = {
+  get fase() { return fase; }, get resultaten() { return resultaten; }, get levels() { return levelsGespeeld; }, get niveau() { return niveau; }, get kal() { return kal; },
+  get LV() { return LV; }, get schoten() { return schoten; }, get spel() { return spel; }, get wolk() { return wolkTekst; }, get gebeurtenissen() { return gebeurtenissen; }, get log() { return log; },
+  laadLevel, resetSpel, botStap, bot, meetData, toonResultaten, kies: (id) => { menuKeuze = id; }, _update: update, set nepHanden(v) { nepHanden = v; }, THREE, menu, knoppen,
+  zetUitleg: (b) => { warmupAan = b; }
+};
+</script>
+</body>
+</html>
