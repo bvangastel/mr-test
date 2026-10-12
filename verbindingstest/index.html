@@ -26,6 +26,7 @@
   [hidden]{display:none!important}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
 </script>
@@ -38,6 +39,7 @@
     <b>Zo werkt het</b>
     <ol>
       <li>Open deze pagina op twee apparaten (twee Quests, of eerst een Quest en een laptop of telefoon).</li>
+      <li>Kies op beide <b>dezelfde verbinding</b>. "Via server" werkt op de meeste netwerken; "Direct" is sneller maar wordt op school- en bedrijfsnetwerken vaak geblokkeerd.</li>
       <li>Typ op beide <b>dezelfde kamercode</b> (of laat er één maken en neem die over) en druk op <b>Verbinden</b>. Wie het eerst verbindt is speler A (blauw), de ander speler B (roze).</li>
       <li>Zie je "Verbonden", dan zie je hieronder de <b>ping</b> (heen en terug in milliseconden) en het verbindingstype.</li>
       <li>Op de Quest: druk op <b>Start MR</b>. Sta even stil en kijk recht vooruit. Je tegenstander verschijnt op 3 m voor je als hoofd met handen en beweegt live mee.</li>
@@ -49,6 +51,11 @@
     <label for="code"><b>Kamercode</b></label><br>
     <input type="text" id="code" maxlength="6" autocomplete="off" spellcheck="false">
     <button class="klein" id="nieuweCode">Nieuwe code</button><br>
+    <label for="transport" style="display:inline-block;margin-top:.7rem"><b>Verbinding</b></label><br>
+    <select id="transport" style="font:inherit;font-size:1.05rem;padding:.35rem .5rem;border-radius:10px;background:#2b2342;color:#f2eef8;border:1px solid #4a3d63">
+      <option value="server">Via server (MQTT) – werkt bijna altijd</option>
+      <option value="peerjs">Direct (PeerJS / WebRTC)</option>
+    </select><br>
     <button class="groot" id="verbind">Verbinden</button>
     <button class="groot" id="startMR" disabled>Start MR</button>
     <div id="status">Nog niet verbonden</div>
@@ -66,7 +73,7 @@
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.1';
+const VERSIE = '0.2';
 document.getElementById('versie').textContent = 'verbindingstest versie ' + VERSIE;
 const VB = new URLSearchParams(location.search);
 const $ = id => document.getElementById(id);
@@ -107,6 +114,7 @@ function ontvang(d) {
   else if (d.t === 'hallo') gebeurtenis('hallo', { van: d.rol, versie: d.versie });
 }
 function koppel(c) {
+  if (c.peerConnection !== undefined || c.provider) bewaakIce(c);
   c.on('open', () => bijVerbonden(c));
   c.on('data', ontvang);
   c.on('close', () => bijVerbroken('de ander is weg'));
@@ -118,7 +126,7 @@ function verbindPeer(code) {
   // eerst proberen speler A te worden (de 'gastheer' van de kamer); bestaat die al, dan worden we speler B
   peer = new Peer(PREFIX + code + '-a', { config: ice, debug: 1 });
   peer.on('open', () => { rol = 'A'; setStatus(`Kamer ${code} geopend. Wacht op speler B…`); gebeurtenis('kamer-open', { code }); });
-  peer.on('connection', c => { if (conn) { c.close(); return; } c.on('open', () => {}); koppel(c); });
+  peer.on('connection', c => { if (verbonden) { c.close(); return; } setStatus('Speler B gevonden, verbinden…'); koppel(c); });
   peer.on('disconnected', () => { if (!verbonden) setStatus('Contact met de koppelserver kwijt, opnieuw…'); try { peer.reconnect(); } catch (e) {} });
   peer.on('error', e => {
     if (e.type === 'unavailable-id' && !rol) {   // kamer bestaat al: wij zijn speler B
@@ -131,25 +139,70 @@ function verbindPeer(code) {
     setStatus('Fout: ' + (e.type || e.message), '#ff6b6b'); gebeurtenis('fout', { type: e.type, fout: e.message });
   });
 }
-function verbindLokaal(code) {   // alleen voor testen: twee tabbladen in dezelfde browser
-  const kanaal = new BroadcastChannel(PREFIX + code), mijnId = Math.random().toString(36).slice(2);
-  const handlers = {};
-  const c = { send: m => kanaal.postMessage({ van: mijnId, m }), on: (n, f) => { handlers[n] = f; }, close: () => kanaal.close() };
+// Kamer op een gedeeld berichtenkanaal: wie geen antwoord krijgt wordt A, wie later komt B
+function kamer(code, kanaal, label) {
+  const mijnId = Math.random().toString(36).slice(2), handlers = {};
+  const c = { send: m => kanaal.post({ van: mijnId, naar: ander, m }), on: (n, f) => { handlers[n] = f; }, close: () => kanaal.sluit() };
   let ander = null;
-  kanaal.onmessage = e => {
-    const { van, m, zoek, ja } = e.data;
-    if (van === mijnId) return;
-    if (zoek && !ander && rol === 'A') { ander = van; kanaal.postMessage({ van: mijnId, ja: van }); handlers.open && handlers.open(); return; }
-    if (ja === mijnId && !ander) { ander = van; rol = 'B'; handlers.open && handlers.open(); return; }
-    if (m && van === ander) handlers.data && handlers.data(m);
-  };
+  kanaal.ontvang(d => {
+    if (!d || d.van === mijnId) return;
+    if (d.zoek && rol === 'A' && d.van !== ander) { ander = d.van; kanaal.post({ van: mijnId, ja: d.van }); handlers.open && handlers.open(); return; }   // (ook als de ander opnieuw komt)
+    if (d.ja === mijnId && !ander) { ander = d.van; rol = 'B'; handlers.open && handlers.open(); return; }
+    if (d.m && d.van === ander && (!d.naar || d.naar === mijnId)) handlers.data && handlers.data(d.m);
+  });
   koppel(c);
-  kanaal.postMessage({ van: mijnId, zoek: true });
-  setTimeout(() => { if (!ander) { rol = 'A'; setStatus(`Kamer ${code} geopend (lokaal). Wacht op speler B…`); } }, 300);
+  kanaal.post({ van: mijnId, zoek: true });
+  setTimeout(() => { if (!ander && !rol) { rol = 'A'; kanaal.post({ van: mijnId, zoek: true }); setStatus(`Kamer ${code} geopend (${label}). Wacht op speler B…`); gebeurtenis('kamer-open', { code, via: label }); } }, 1200 + Math.random() * 1200);
+}
+function verbindLokaal(code) {   // alleen voor testen: twee tabbladen in dezelfde browser
+  const bc = new BroadcastChannel(PREFIX + code);
+  verbType = 'lokaal (test)';
+  kamer(code, { post: o => bc.postMessage(o), ontvang: f => { bc.onmessage = e => f(e.data); }, sluit: () => bc.close() }, 'lokaal');
+}
+// via een gratis openbare MQTT-server (websocket): alle berichten lopen via de server
+const BROKERS = [
+  { naam: 'EMQX', url: 'wss://broker.emqx.io:8084/mqtt' },
+  { naam: 'HiveMQ', url: 'wss://broker.hivemq.com:8884/mqtt' },
+  { naam: 'shiftr.io', url: 'wss://public.cloud.shiftr.io', username: 'public', password: 'public' }
+];
+function verbindServer(code, nr = 0) {
+  if (typeof mqtt === 'undefined') { setStatus('MQTT-bibliotheek kon niet geladen worden (geen internet?)', '#ff6b6b'); return; }
+  const b = BROKERS[nr];
+  if (!b) { setStatus('Geen enkele server bereikbaar vanaf dit netwerk', '#ff6b6b'); gebeurtenis('fout', { type: 'geen-server' }); return; }
+  setStatus(`Verbinden met server ${b.naam}…`);
+  const topic = 'ixbattle/vt/' + code;
+  let gelukt = false;
+  const cl = mqtt.connect(b.url, { clientId: 'ixb_' + Math.random().toString(36).slice(2, 10), connectTimeout: 6000, reconnectPeriod: 0, clean: true, username: b.username, password: b.password });
+  const opgeven = setTimeout(() => { if (!gelukt) { try { cl.end(true); } catch (e) {} gebeurtenis('server-mislukt', { server: b.naam }); verbindServer(code, nr + 1); } }, 7000);
+  let ontvanger = null;
+  cl.on('message', (t, buf) => { try { ontvanger && ontvanger(JSON.parse(buf.toString())); } catch (e) {} });
+  cl.on('connect', () => {
+    if (gelukt) return;
+    gelukt = true; clearTimeout(opgeven); cl.options.reconnectPeriod = 2000;
+    verbType = `via server (${b.naam})`; gebeurtenis('server', { server: b.naam });
+    cl.subscribe(topic, { qos: 0 }, () => {
+      kamer(code, { post: o => cl.publish(topic, JSON.stringify(o), { qos: 0 }), ontvang: f => { ontvanger = f; }, sluit: () => cl.end() }, b.naam);
+    });
+  });
+  cl.on('offline', () => { if (gelukt) setStatus('Server tijdelijk weg, opnieuw verbinden…', '#ff6b6b'); });
+  cl.on('reconnect', () => gebeurtenis('server-opnieuw'));
+  cl.on('error', e => { gebeurtenis('server-fout', { server: b.naam, fout: e && e.message }); if (!gelukt) { clearTimeout(opgeven); try { cl.end(true); } catch (x) {} verbindServer(code, nr + 1); } });
+}
+function bewaakIce(c) {   // alleen bij Direct: toon de WebRTC-status en geef na 15 s een duidelijke melding
+  const start = performance.now();
+  const iv = setInterval(() => {
+    if (verbonden) { clearInterval(iv); return; }
+    const pc = c.peerConnection, st = pc ? pc.iceConnectionState : 'nog niet gestart';
+    const sec = Math.round((performance.now() - start) / 1000);
+    if (st === 'failed' || sec > 15) {
+      clearInterval(iv); gebeurtenis('direct-mislukt', { ice: st, sec });
+      setStatus('Direct verbinden lukt niet op dit netwerk (WebRTC: ' + st + '). Kies "Via server", herlaad de pagina en probeer opnieuw.', '#ff6b6b');
+    } else setStatus(`Verbinden… (WebRTC: ${st}, ${sec} s)`);
+  }, 1000);
 }
 async function meetType() {   // direct of via een doorgeefserver (relay)?
   try {
-    const pc = conn && conn.peerConnection; if (!pc) { verbType = VB.get('transport') === 'lokaal' ? 'lokaal (test)' : 'onbekend'; toonStats(); return; }
+    const pc = conn && conn.peerConnection; if (!pc) { if (verbType === '–') verbType = 'onbekend'; toonStats(); return; }
     const st = await pc.getStats(); let paar = null; const cands = {};
     st.forEach(r => { if (r.type === 'candidate-pair' && (r.nominated || r.selected) && r.state === 'succeeded') paar = r; if (r.type === 'local-candidate' || r.type === 'remote-candidate') cands[r.id] = r; });
     if (paar) { const l = cands[paar.localCandidateId], r = cands[paar.remoteCandidateId]; verbType = (l && r) ? `${l.candidateType} ↔ ${r.candidateType}${l.candidateType === 'relay' || r.candidateType === 'relay' ? ' (via relay)' : ' (direct)'}` : 'direct'; }
@@ -178,9 +231,11 @@ $('nieuweCode').onclick = () => { $('code').value = maakCode(); };
 $('verbind').onclick = () => {
   const code = $('code').value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (code.length < 3) { setStatus('Kies een code van minstens 3 tekens', '#ff6b6b'); return; }
-  $('verbind').disabled = true; $('code').disabled = true; $('nieuweCode').disabled = true;
-  t0 = performance.now(); gebeurtenis('start', { code, transport: VB.get('transport') || 'peerjs' });
-  if (VB.get('transport') === 'lokaal') verbindLokaal(code);
+  $('verbind').disabled = true; $('code').disabled = true; $('nieuweCode').disabled = true; $('transport').disabled = true;
+  const tr = VB.get('transport') || $('transport').value;
+  t0 = performance.now(); gebeurtenis('start', { code, transport: tr });
+  if (tr === 'lokaal') verbindLokaal(code);
+  else if (tr === 'server') verbindServer(code, +(VB.get('broker') || 0));
   else if (typeof Peer === 'undefined') setStatus('PeerJS kon niet geladen worden (geen internet?)', '#ff6b6b');
   else verbindPeer(code);
 };
