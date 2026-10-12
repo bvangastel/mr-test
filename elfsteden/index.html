@@ -2142,6 +2142,7 @@ function voorbeeld(t) {
     camera.aspect = innerWidth / innerHeight; camera.fov = 75; camera.updateProjectionMatrix();
     camera.position.set(0, 1.67, 0); zetBase({ x: 0, y: 1.67, z: 0 }, new THREE.Quaternion());
     if (VB.has('derde')) { camera.position.set(1.1, 2.0, 2.0); camera.lookAt(0, 1.0, -1.5); }
+    if (VB.has('cam')) { const c = VB.get('cam').split(',').map(Number); camera.position.set(c[0], c[1], c[2]); camera.lookAt(c[3], c[4], c[5]); if (c[6]) { camera.fov = c[6]; camera.updateProjectionMatrix(); } }   // close-up voor testen
     if (VB.has('geensneeuw')) sneeuw.visible = false;
     const o = VB.get('opdr');
     if (o === 'splits') { plaatsObject(maakSplitsing('Sneek', 'Dokkum', 1)); object.userData.dDiv = +(VB.get('d') || 3); }
@@ -2176,7 +2177,7 @@ function voorbeeld(t) {
     updateLijf({ x: hx, y: hy, z: 0 }, q0, { left: new THREE.Vector3(-0.32 + hx, hy - 0.55, -0.25), right: new THREE.Vector3(0.3 + hx, hy - 0.35 + 0.1 * Math.sin(ts * 2), -0.45) }, hx, dt);
   }
   pasBochtToe();
-  if (object && object.userData.kraam) { object.userData.a = (t / 1000) % 2.6 - 0.8; zetStempelaar(object, t / 1000); if (VB.has('kaart')) kaartOpTafel(object); }
+  if (object && object.userData.kraam) { object.userData.a = VB.has('a') ? +VB.get('a') : (t / 1000) % 2.6 - 0.8; zetStempelaar(object, t / 1000); if (VB.has('kaart')) kaartOpTafel(object); }
   ijsTex.offset.y += vv * dt / 2.5;
   for (const paal of palen) { paal.position.z += vv * dt; if (paal.position.z > 1.5) paal.position.z -= 30; }
   wereld.updateMatrixWorld(); wolk.position.copy(wereld.localToWorld(new THREE.Vector3(maatje.position.x, base.wolkY, -2.6))); wolk.lookAt(0, wolk.position.y, 0);
