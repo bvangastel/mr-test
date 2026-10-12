@@ -705,7 +705,7 @@ function maakEchtGezicht(kop, o, huid) {
     kop.add(m(G.doos, tm('#3a2a20'), [0.004, 0.004, 0.11], [k * 0.068, 0.022, -0.068], [0, k * -0.25, 0]));      // brillenpoot
   }
   kop.add(m(G.doos, tm('#3a2a20'), [0.018, 0.004, 0.004], [0, 0.024, -0.123]));                                 // brugje
-  const mond = new THREE.Mesh(new THREE.TorusGeometry(0.02, 0.0045, 6, 12, Math.PI), tm('#9a4a48')); mond.rotation.z = Math.PI; mond.position.set(0, -0.062, -0.108); kop.add(mond);
+  const mond = new THREE.Mesh(new THREE.TorusGeometry(0.017, 0.0035, 6, 12, Math.PI), tm('#7a3a3a')); mond.rotation.set(-0.35, 0, Math.PI); mond.scale.y = 0.6; mond.position.set(0, -0.06, -0.1); kop.add(mond);
   const muts = new THREE.Mesh(G.halfBol, cTex('mutsMat' + o.muts, () => new THREE.MeshToonMaterial({ map: streepTex(o.muts, 6), gradientMap: toonGrad })));
   muts.scale.set(0.118, 0.14, 0.12); muts.position.y = 0.045; kop.add(muts);
   const rand = new THREE.Mesh(new THREE.TorusGeometry(0.112, 0.02, 6, 18).rotateX(Math.PI / 2), tm(o.muts[1])); rand.scale.z = 1.04; rand.position.y = 0.05; kop.add(rand);
@@ -1255,9 +1255,9 @@ function zetStempelaar(kr, t = 0) {
   else { pos = u.rust.clone(); kijk = 0.15; }
   u.stempel.position.copy(pos); u.stempel.rotation.set(0, 0, kantel * u.kant);
   const su = u.st.userData;
-  poseerFiguur(u.st, { s: 0, hurk: 0.1 + 0.08 * buig, buk: 0.1 + 0.55 * buig }, t);
+  poseerFiguur(u.st, { s: 0, hurk: 0.12 + 0.03 * buig, buk: 0.08 + 0.17 * buig }, t);   // licht voorover, niet met zijn neus op tafel
   su.romp.rotation.y = 0.18 * buig;   // schouder draait mee naar de stempel
-  if (su.kop) { su.kop.rotation.x -= 0.5 * kijk; su.kop.rotation.y = -0.12 * kijk; }
+  if (su.kop) { su.kop.rotation.x -= 0.42 * kijk; su.kop.rotation.y = -0.12 * kijk; }
   if (su.ogen) { const knip = (t % 3.7) < 0.12 ? 0.15 : 1; for (const o of su.ogen) o.scale.y = knip; }
   kr.updateMatrixWorld(true);
   const greep = u.stempel.localToWorld(new THREE.Vector3(0, 0.12, 0));
