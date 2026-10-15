@@ -867,7 +867,7 @@ function ontvangUitslag(d) {
   if (w) { w.geraakt = d.geraakt; w.afstand = d.afstand; w.uitslagNa = +(performance.now() - w.verstuurd).toFixed(0); delete w.verstuurd; }
   if (d.reden) return;
   if (d.geraakt) {
-    score.raak++; avatar.userData.flits = 1; geluid.vang();
+    score.raak++; avatar.userData.flits = 1; geluid.vang(); laatNaEinde();
     vonk(anderNu.kop, 0xff7a1a, 40, 1.8, 0.7);
     zetPopup('Raak! 🎯', '#5ee08a', anderNu.kop.clone().add(new THREE.Vector3(0, 0.35, 0)));
   } else zetPopup('Ontweken', '#ffd0d0', anderNu.kop.clone().add(new THREE.Vector3(0, 0.35, 0)));
@@ -888,7 +888,7 @@ function updateVliegers(dt) {
       const geraakt = d < D.raak, uitwijk = Math.hypot(mijnKop.x - w.kopStart.x, mijnKop.y - w.kopStart.y);
       stuurZeker({ t: 'uitslag', id: w.id, geraakt, afstand: +d.toFixed(3) });
       worpen.push({ t: +nu().toFixed(2), ronde: spel.ronde, soort: 'ontvangen', id: w.id, geraakt, afstand: +d.toFixed(3), uitwijk: +uitwijk.toFixed(3), daal: +(base.y - mijnKop.y).toFixed(3) });
-      if (geraakt) { score.geraakt++; flitsT = tijd; geluid.geraakt(); vonk(w.mesh.position, 0xff5a1f, 40, 1.8, 0.7); wereld.remove(w.mesh); vliegers.splice(i, 1); continue; }
+      if (geraakt) { score.geraakt++; laatNaEinde(); flitsT = tijd; geluid.geraakt(); vonk(w.mesh.position, 0xff5a1f, 40, 1.8, 0.7); wereld.remove(w.mesh); vliegers.splice(i, 1); continue; }
       geluid.ontweken();
     }
     if (w.t > w.duur * 1.8) { wereld.remove(w.mesh); vliegers.splice(i, 1); }
@@ -911,6 +911,12 @@ spel.ontvang = d => {
   else if (d.t === 'uitslag') ontvangUitslag(d);
   else if (d.t === 'stop') { zetMidden('De ander is gestopt', '#ff6b6b'); }
 };
+function laatNaEinde() {   // uitslag die net na het eindsignaal binnenkomt: rondeuitslag en menu bijwerken
+  if (spel.fase !== 'einde' || !rondes.length) return;
+  const r = rondes.at(-1); r.raak = score.raak; r.geraakt = score.geraakt; r.laat = (r.laat || 0) + 1;
+  if (menu.visible) { const k = knoppen[1].userData, gelijk = score.raak === score.geraakt; k.tekst = gelijk ? 'Gelijkspel' : score.raak > score.geraakt ? 'Gewonnen! 🏆' : 'Verloren'; k.sub = `${score.raak} – ${score.geraakt}`; knopTekenen(knoppen[1]); }
+  middenTekst = null; zetMidden(score.raak === score.geraakt ? 'Gelijkspel!' : score.raak > score.geraakt ? 'Jij wint! 🏆' : 'Je tegenstander wint', score.raak === score.geraakt ? '#ffffff' : score.raak > score.geraakt ? '#5ee08a' : '#EB69BB');
+}
 function eindeRonde(p, q) {
   spel.fase = 'einde';
   const r = { ronde: spel.ronde + 1, raak: score.raak, geraakt: score.geraakt, gegooid: worpen.filter(w => w.ronde === spel.ronde && w.soort === 'gegooid').length, ontvangen: worpen.filter(w => w.ronde === spel.ronde && w.soort === 'ontvangen').length };
