@@ -45,8 +45,10 @@
       <li>In dezelfde ruimte: ga <b>tegenover elkaar</b> staan op de afstand die je hieronder kiest, met vrije ruimte om je heen. Je tegenstander verschijnt dan ongeveer waar hij echt staat. Op verschillende plekken kan dit ook gewoon.</li>
       <li>Kies op beide headsets <b>dezelfde verbinding en kamercode</b> en druk op <b>Verbinden</b>. Daarna <b>Start MR</b>: sta even stil en kijk recht vooruit.</li>
       <li>Staan jullie allebei klaar, dan telt het spel af en duurt de ronde 2 minuten.</li>
-      <li><b>Gooien</b> (voorlopig): knijp met duim en wijsvinger, dan vliegt er een rotsblok uit die hand naar je tegenstander. Je hebt <b>3 blokken</b> en ze laden vanzelf weer op.</li>
+      <li><b>Gooien:</b> een <b>bovenhandse worp</b>. Breng je hand omhoog naast je hoofd en zwaai hem krachtig naar voren. Het blok gaat waar je heen gooit (met een beetje hulp bij het richten). Je hebt <b>3 blokken</b>; ze laden vanzelf weer op.</li>
       <li><b>Ontwijken:</b> duik weg of leun opzij. Jouw headset bepaalt of je geraakt bent. Je voeten blijven op hun plek.</li>
+      <li><b>Schild (3× per ronde):</b> "rits een tent open": beweeg één hand snel van je heup recht omhoog tot boven je gezicht. Op die plek verschijnt een energiescherm dat je <b>4 seconden</b> beschermt.</li>
+      <li><b>Turboblok:</b> zet <b>3 echte pylonen</b> op ongeveer 1 m voor je, 1 m uit elkaar. Na het opstellen tik je ze één voor één aan (hand op de top). Licht er tijdens het spel een pylon op, duw hem dan om: je volgende rotsblok is een snel turboblok.</li>
       <li>Geen tegenstander bij de hand? Kies bij Verbinding <b>Oefenen tegen robot</b>.</li>
     </ol>
   </div>
@@ -65,6 +67,10 @@
     </select><br>
     <label class="kop" for="afstand"><b>Afstand tot je tegenstander</b></label><br>
     <select id="afstand"><option value="3">3 m</option><option value="4" selected>4 m</option><option value="5">5 m</option></select><br>
+    <div style="margin-top:.7rem;line-height:2">
+      <label><input type="checkbox" id="optPylonen" checked style="transform:scale(1.3);margin-right:.6rem">Pylonen gebruiken voor turboblokken</label><br>
+      <label><input type="checkbox" id="optKnijp" style="transform:scale(1.3);margin-right:.6rem">Gooien met knijpen (oude manier, om te vergelijken)</label>
+    </div>
     <button class="groot" id="verbind">Verbinden</button>
     <button class="groot" id="startMR" disabled>Start MR</button>
     <div id="status">Nog niet verbonden</div>
@@ -83,13 +89,23 @@
 
 <script type="module">
 import * as THREE from 'three';
-const VERSIE = '0.1';
+const VERSIE = '0.2';
 document.getElementById('versie').textContent = 'iXbattle Duel versie ' + VERSIE + ' · netwerk v0.3';
 const VB = new URLSearchParams(location.search);
 const $ = id => document.getElementById(id);
 const D = {
   poortZ: -7.6, poortR: 2.1, poortY: 2.15,
-  vlucht: 1.6,          // vliegtijd van een rotsblok (s)
+  vlucht: 1.4,          // vliegtijd van een rotsblok (s)
+  turboVlucht: 0.9,     // vliegtijd van een turboblok (s)
+  richtHulp: 0.5,       // 0 = precies waar je gooit, 1 = altijd op het hoofd van de ander (links/rechts)
+  hoogteTelt: 0.15,     // de hoogte van je worp telt maar een beetje mee (bovenhands gaat vanzelf omlaag)
+  maxAfwijking: 1.2,    // een worp gaat nooit meer dan 1,2 m naast het hoofd van de ander
+  // bovenhandse worp: hand eerst hoog naast/boven je hoofd, dan snel naar voren
+  worpSnel: 2.0, worpVooruit: 1.3, worpHoog: 0.12, worpTerug: 0.25, worpPauze: 0.6,
+  // schild: hand snel van heuphoogte omhoog tot boven je gezicht ("tent openritsen")
+  schilden: 3, schildDuur: 4, schildBreed: 0.8, ritsLaag: 0.7, ritsHoog: 0.2, ritsSnel: 0.9, ritsOpzij: 0.4,
+  // pylonen: na 8 s en daarna elke 10–16 s licht er één op; 6 s de tijd om hem om te duwen
+  pylonEerste: 8, pylonTussen: [10, 16], pylonAan: 6, pylonBereik: 0.25,
   raak: 0.22,           // rotsblok binnen 22 cm van je hoofd = geraakt
   maxBlokken: 3, laadTijd: 1.5, wachtTussen: 0.5,   // 3 blokken, elke 1,5 s komt er één bij, minstens 0,5 s tussen twee worpen
   rondeTijd: 120, aftellen: 3,
@@ -368,6 +384,11 @@ const geluid = {
   mis: () => toon(260, 0.3, 0, 0.14),
   ontweken: () => ruis(0.45, 3000, 400, 0.3),
   geraakt: () => { toon(130, 0.25, 0, 0.4, 'square'); toon(80, 0.3, 0.04, 0.3); ruis(0.3, 800, 200, 0.3); },
+  schietTurbo: () => { toon(1400, 0.25, 0, 0.14, 'sawtooth', 500); ruis(0.3, 6000, 1500, 0.2); },
+  schild: () => { toon(300, 0.35, 0, 0.12, 'sine', 900); toon(600, 0.3, 0.05, 0.08, 'triangle', 1500); },
+  blok: () => { toon(1800, 0.12, 0, 0.15, 'square', 900); ruis(0.2, 4000, 2000, 0.25); },
+  pylon: () => { toon(660, 0.1, 0, 0.12); toon(880, 0.1, 0.08, 0.12); },
+  turbo: () => { [880, 1175, 1568, 2093].forEach((f, i) => toon(f, 0.14, i * 0.06, 0.12)); },
   finish: () => { [523, 659, 784, 1047, 1319].forEach((f, i) => toon(f, 0.28, i * 0.12)); }
 };
 // ---------- Handen (handschoenen) ----------
@@ -669,7 +690,7 @@ setInterval(toonStats, 1000);
 // ---------- Robot als tegenstander (zelfde berichten, met nep-vertraging) ----------
 function verbindBot() {
   rol = 'A'; verbType = 'robot (geen netwerk)';
-  const handlers = {}, L = 0.12, robot = { kop: [0, 1.65, 0], ronde: 0, volgendeWorp: 3, t: 0 };
+  const handlers = {}, L = 0.12, robot = { kop: [0, 1.65, 0], ronde: 0, volgendeWorp: 3, t: 0, schilden: 3 };
   const naarRobot = m => setTimeout(() => botOntvang(m), L * 1000);
   const vanRobot = m => setTimeout(() => handlers.data && handlers.data(m), L * 1000);
   const c = { send: naarRobot, on: (n, f) => { handlers[n] = f; } };
@@ -677,12 +698,19 @@ function verbindBot() {
   function botOntvang(m) {
     if (m.zeker) vanRobot({ t: 'ack', zid: m.zid });
     if (m.t === 'ping') vanRobot({ t: 'pong', s: m.s });
-    else if (m.t === 'klaar') { zeker({ t: 'klaar', ronde: m.ronde }); }
-    else if (m.t === 'worp') {   // de robot duikt meestal weg
-      const ontwijkt = Math.random() < 0.65;
+    else if (m.t === 'klaar') { robot.schilden = D.schilden; zeker({ t: 'klaar', ronde: m.ronde }); }
+    else if (m.t === 'worp') {   // de robot zet soms een schild, duikt meestal weg
+      const kans = Math.random();
+      if (kans < 0.25 && robot.schilden > 0) {
+        robot.schilden--; zeker({ t: 'schild', x: 0.05, z: -0.4, yl: 0.5, yh: 2.0, b: D.schildBreed, duur: D.schildDuur });
+        setTimeout(() => zeker({ t: 'uitslag', id: m.id, geraakt: false, geblokt: true, afstand: 0.3 }), (m.duur || D.vlucht) * 1000);
+        return;
+      }
+      const ontwijkt = kans < 0.7;
       if (ontwijkt) robot.duik = { t: 0, kant: Math.random() < 0.5 ? -1 : 1 };
       setTimeout(() => zeker({ t: 'uitslag', id: m.id, geraakt: !ontwijkt, afstand: ontwijkt ? 0.4 : 0.05 }), (m.duur || D.vlucht) * 1000);
     }
+    else if (m.t === 'klaar') robot.schilden = D.schilden;
   }
   let bt = 0;
   setInterval(() => {   // robot beweegt (10x per seconde) en gooit tijdens het spel
@@ -693,7 +721,9 @@ function verbindBot() {
     vanRobot(pose);
     if (spel.fase === 'spel' && spel.klok > robot.volgendeWorp) {
       robot.volgendeWorp = spel.klok + 2.5 + Math.random() * 2;
-      zeker({ t: 'worp', id: 'R' + Math.round(bt * 10), van: [x + 0.3, y - 0.25, -0.35], duur: D.vlucht });
+      const turbo = Math.random() < 0.2;
+      if (turbo) zeker({ t: 'turbo' });
+      zeker({ t: 'worp', id: 'R' + Math.round(bt * 10), van: [x + 0.3, y - 0.25, -0.35], duur: turbo ? D.turboVlucht : D.vlucht, turbo: turbo ? 1 : 0, mis: [(Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.3] });
     }
     if (spel.fase !== 'spel') robot.volgendeWorp = 3;
   }, 100);
@@ -803,21 +833,27 @@ function tekenBord(tekstMidden) {
   c.fillText(tekstMidden, w / 2, 160);
   bord.userData.tex.needsUpdate = true;
 }
-const meter = tekenVlak(512, 300, 0.3, 0.176, 9); wereld.add(meter);
+const meter = tekenVlak(512, 420, 0.3, 0.246, 9); wereld.add(meter);
 function tekenMeter() {
-  const c = meter.userData.ctx, w = 512, h = 300;
+  const c = meter.userData.ctx, w = 512, h = 420;
   c.clearRect(0, 0, w, h);
   c.fillStyle = 'rgba(22,14,44,0.85)'; c.beginPath(); c.roundRect(6, 6, w - 12, h - 12, 36); c.fill(); c.strokeStyle = rol === 'A' ? '#43BFFD' : '#EB69BB'; c.lineWidth = 6; c.stroke();
-  c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillStyle = '#b9aecb'; c.font = 'bold 34px system-ui, sans-serif'; c.fillText('ROTSBLOKKEN', 34, 50);
+  c.textBaseline = 'middle'; c.textAlign = 'left'; c.fillStyle = '#b9aecb'; c.font = 'bold 32px system-ui, sans-serif'; c.fillText('ROTSBLOKKEN', 34, 46);
   for (let i = 0; i < D.maxBlokken; i++) {
     const x = 90 + i * 130, vol = i < Math.floor(blokken), deel = i === Math.floor(blokken) ? blokken % 1 : 0;
-    c.beginPath(); c.arc(x, 140, 44, 0, Math.PI * 2); c.fillStyle = '#3a2a4a'; c.fill();
-    if (vol) { c.fillStyle = '#d2552c'; c.beginPath(); c.arc(x, 140, 44, 0, Math.PI * 2); c.fill(); c.fillStyle = '#ff9a5a'; c.beginPath(); c.arc(x - 12, 126, 12, 0, Math.PI * 2); c.fill(); }
-    else if (deel > 0) { c.strokeStyle = '#d2552c'; c.lineWidth = 10; c.beginPath(); c.arc(x, 140, 38, -Math.PI / 2, -Math.PI / 2 + deel * Math.PI * 2); c.stroke(); }
+    c.beginPath(); c.arc(x, 118, 40, 0, Math.PI * 2); c.fillStyle = '#3a2a4a'; c.fill();
+    if (vol) { c.fillStyle = turbo && i === Math.floor(blokken) - 1 ? '#43BFFD' : '#d2552c'; c.beginPath(); c.arc(x, 118, 40, 0, Math.PI * 2); c.fill(); c.fillStyle = '#ffffff55'; c.beginPath(); c.arc(x - 12, 104, 11, 0, Math.PI * 2); c.fill(); }
+    else if (deel > 0) { c.strokeStyle = '#d2552c'; c.lineWidth = 10; c.beginPath(); c.arc(x, 118, 34, -Math.PI / 2, -Math.PI / 2 + deel * Math.PI * 2); c.stroke(); }
   }
+  c.fillStyle = '#b9aecb'; c.font = 'bold 32px system-ui, sans-serif'; c.textAlign = 'left'; c.fillText('SCHILD', 34, 200);
+  for (let i = 0; i < D.schilden; i++) { const x = 200 + i * 70; c.fillStyle = i < schildenOver ? '#43BFFD' : '#3a2a4a'; c.beginPath(); c.moveTo(x, 178); c.lineTo(x + 24, 186); c.lineTo(x + 22, 212); c.lineTo(x, 226); c.lineTo(x - 22, 212); c.lineTo(x - 24, 186); c.closePath(); c.fill(); }
+  if (mijnSchild) { c.fillStyle = '#F6F01D'; c.textAlign = 'right'; c.fillText(Math.ceil(mijnSchild.eind - tijd) + ' s', w - 30, 200); }
+  c.textAlign = 'center'; c.font = 'bold 44px system-ui, sans-serif';
+  if (turbo) { c.fillStyle = '#43BFFD'; c.fillText('⚡ TURBO KLAAR', w / 2, 290); }
+  else if (pylonAan) { c.fillStyle = '#F6F01D'; c.fillText('Duw de pylon om!', w / 2, 290); }
   const p = gemPing();
-  c.fillStyle = '#b9aecb'; c.font = '32px system-ui, sans-serif'; c.textAlign = 'center';
-  c.fillText(transport === 'bot' ? 'oefenen tegen robot' : `ping ${p === null ? '–' : Math.round(p)} ms`, w / 2, 245);
+  c.fillStyle = '#b9aecb'; c.font = '30px system-ui, sans-serif';
+  c.fillText(transport === 'bot' ? 'oefenen tegen robot' : `ping ${p === null ? '–' : Math.round(p)} ms`, w / 2, 370);
   meter.userData.tex.needsUpdate = true;
 }
 const midden = tekenVlak(1024, 300, 1.0, 0.29, 13); midden.material.depthTest = false; midden.visible = false; scene.add(midden);
@@ -837,41 +873,112 @@ const vliegers = [];   // { mesh, van, v, duur, t, soort: 'uit'|'in', id, klaar 
 let blokken = D.maxBlokken, laatsteWorp = -9, worpNr = 0;
 const score = { raak: 0, geraakt: 0 };
 let worpen = [], rondes = [], frames = [];
-function maakSteen(kleur) {
-  const m = maakMeteoriet(); m.scale.setScalar(0.9); return m;
+const turboMat = new THREE.MeshToonMaterial({ color: 0x1d4f8a, emissive: 0x43BFFD, emissiveIntensity: 0.6, gradientMap: toonGrad });
+function maakSteen(isTurbo) {
+  const m = maakMeteoriet(); m.scale.setScalar(0.9);
+  if (isTurbo) { m.userData.steen.material = turboMat; m.children[1].material = m.children[1].material.clone(); m.children[1].material.color.setHex(K.blauw); m.children[1].scale.setScalar(0.7); m.userData.spoor = 0x8fe3ff; }
+  return m;
 }
-function gooi(kant) {
-  if (spel.fase !== 'spel' || blokken < 1 || tijd - laatsteWorp < D.wachtTussen) { if (spel.fase === 'spel' && blokken < 1) geluid.mis(); return; }
+let turbo = false, schildenOver = D.schilden, mijnSchild = null;
+// gooien: richting = waar je hand heen zwaait; we sturen de afwijking t.o.v. het hoofd van de ander mee
+function gooi(kant, richting) {
+  if (spel.fase !== 'spel' || blokken < 1 || tijd - laatsteWorp < D.wachtTussen) { if (spel.fase === 'spel' && blokken < 1) geluid.mis(); return false; }
   const h = (kant && mijnHanden[kant]) || mijnHanden.right || mijnHanden.left;
   const van = h ? h.clone() : mijnKop.clone().add(new THREE.Vector3(0.2, -0.3, -0.3));
-  blokken -= 1; laatsteWorp = tijd;
+  const doelKop = avatar.visible ? anderNu.kop.clone() : new THREE.Vector3(0, 1.6, -AFSTAND);
+  let mis = [0, 0];
+  if (richting && richting.z < -0.2) {   // waar zou deze worp langs het hoofd van de ander gaan?
+    const tt = (doelKop.z - van.z) / richting.z, P = van.clone().addScaledVector(richting, tt);
+    mis = [(P.x - doelKop.x) * (1 - D.richtHulp), THREE.MathUtils.clamp((P.y - doelKop.y) * D.hoogteTelt, -0.3, 0.3)];   // een bovenhandse worp gaat vanzelf wat omlaag: hoogte telt maar een beetje
+    const l = Math.hypot(mis[0], mis[1]); if (l > D.maxAfwijking) { mis[0] *= D.maxAfwijking / l; mis[1] *= D.maxAfwijking / l; }
+  }
+  const isTurbo = turbo, duur = isTurbo ? D.turboVlucht : D.vlucht;
+  turbo = false; blokken -= 1; laatsteWorp = tijd;
   const id = `${rol}${++worpNr}`;
-  stuurZeker({ t: 'worp', id, van: van.toArray().map(v => +v.toFixed(3)), duur: D.vlucht });
-  const naar = avatar.visible ? anderNu.kop.clone() : new THREE.Vector3(0, 1.6, -AFSTAND);
-  const mesh = maakSteen(); mesh.position.copy(van); wereld.add(mesh);
-  vliegers.push({ mesh, van, v: naar.sub(van).divideScalar(D.vlucht), duur: D.vlucht, t: 0, soort: 'uit', id });
-  geluid.schietRood();
-  worpen.push({ t: +nu().toFixed(2), ronde: spel.ronde, soort: 'gegooid', id, van: van.toArray().map(v => +v.toFixed(3)), verstuurd: performance.now() });
-  gebeurtenis('worp-uit', { id });
+  stuurZeker({ t: 'worp', id, van: van.toArray().map(v => +v.toFixed(3)), duur, turbo: isTurbo ? 1 : 0, mis: mis.map(v => +v.toFixed(3)) });
+  const naar = doelKop.add(new THREE.Vector3(mis[0], mis[1], 0));
+  const mesh = maakSteen(isTurbo); mesh.position.copy(van); wereld.add(mesh);
+  vliegers.push({ mesh, van, v: naar.sub(van).divideScalar(duur), duur, t: 0, soort: 'uit', id });
+  isTurbo ? geluid.schietTurbo() : geluid.schietRood();
+  worpen.push({ t: +nu().toFixed(2), ronde: spel.ronde, soort: 'gegooid', id, turbo: isTurbo, mis: mis.map(v => +v.toFixed(3)), van: van.toArray().map(v => +v.toFixed(3)), richting: richting ? richting.toArray().map(v => +v.toFixed(2)) : null, verstuurd: performance.now() });
+  gebeurtenis('worp-uit', { id, turbo: isTurbo });
+  return true;
 }
 function ontvangWorp(d) {
+  anderTurbo = false;
   if (spel.fase !== 'spel' || !base) { stuurZeker({ t: 'uitslag', id: d.id, geraakt: false, reden: 'niet in spel' }); return; }
-  const van = spiegel(d.van), naar = mijnKop.clone();   // mikt op waar mijn hoofd nu is
-  const mesh = maakSteen(); mesh.position.copy(van); wereld.add(mesh);
-  vliegers.push({ mesh, van, v: naar.clone().sub(van).divideScalar(d.duur), duur: d.duur, t: 0, soort: 'in', id: d.id, kopStart: mijnKop.clone() });
-  geluid.schiet();
-  gebeurtenis('worp-in', { id: d.id });
+  const mis = d.mis || [0, 0];
+  const van = spiegel(d.van), naar = mijnKop.clone().add(new THREE.Vector3(-mis[0], mis[1], 0));   // mikt op mijn hoofd van nu + zijn afwijking (gespiegeld)
+  const mesh = maakSteen(!!d.turbo); mesh.position.copy(van); wereld.add(mesh);
+  vliegers.push({ mesh, van, v: naar.clone().sub(van).divideScalar(d.duur), duur: d.duur, t: 0, soort: 'in', id: d.id, kopStart: mijnKop.clone(), turbo: !!d.turbo, vorige: van.clone() });
+  d.turbo ? geluid.schietTurbo() : geluid.schiet();
+  gebeurtenis('worp-in', { id: d.id, turbo: !!d.turbo });
 }
 function ontvangUitslag(d) {
   const w = worpen.find(x => x.id === d.id && x.soort === 'gegooid');
-  if (w) { w.geraakt = d.geraakt; w.afstand = d.afstand; w.uitslagNa = +(performance.now() - w.verstuurd).toFixed(0); delete w.verstuurd; }
+  if (w) { w.geraakt = d.geraakt; w.geblokt = !!d.geblokt; w.afstand = d.afstand; w.uitslagNa = +(performance.now() - w.verstuurd).toFixed(0); delete w.verstuurd; }
   if (d.reden) return;
+  const boven = anderNu.kop.clone().add(new THREE.Vector3(0, 0.35, 0));
   if (d.geraakt) {
     score.raak++; avatar.userData.flits = 1; geluid.vang(); laatNaEinde();
     vonk(anderNu.kop, 0xff7a1a, 40, 1.8, 0.7);
-    zetPopup('Raak! 🎯', '#5ee08a', anderNu.kop.clone().add(new THREE.Vector3(0, 0.35, 0)));
-  } else zetPopup('Ontweken', '#ffd0d0', anderNu.kop.clone().add(new THREE.Vector3(0, 0.35, 0)));
-  gebeurtenis('uitslag', { id: d.id, geraakt: d.geraakt });
+    zetPopup(w && w.turbo ? 'Turbo raak! ⚡' : 'Raak! 🎯', '#5ee08a', boven);
+  } else if (d.geblokt) { zetPopup('Geblokt 🛡', '#8fe3ff', boven); geluid.blok(); }
+  else zetPopup('Ontweken', '#ffd0d0', boven);
+  gebeurtenis('uitslag', { id: d.id, geraakt: d.geraakt, geblokt: !!d.geblokt });
+}
+// ---------- Schilden ----------
+const schildTex = canvasTex(256, 256, (g, w, h) => {   // zeshoekjes-patroon
+  g.clearRect(0, 0, w, h); g.strokeStyle = 'rgba(255,255,255,0.9)'; g.lineWidth = 3;
+  const r = 22, dx = r * 1.5, dy = r * Math.sqrt(3);
+  for (let i = -1; i < 9; i++) for (let j = -1; j < 7; j++) {
+    const cx = i * dx, cy = j * dy + (i % 2 ? dy / 2 : 0);
+    g.beginPath(); for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; g[k ? 'lineTo' : 'moveTo'](cx + r * Math.cos(a), cy + r * Math.sin(a)); } g.closePath(); g.stroke();
+  }
+});
+schildTex.wrapS = schildTex.wrapT = THREE.RepeatWrapping; schildTex.repeat.set(2.5, 3);
+function maakSchildMesh(kleur) {
+  const g = new THREE.Group();
+  const vlak = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: kleur, map: schildTex, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  const rand = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: kleur, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  rand.material.opacity = 0.1; rand.position.z = -0.002; g.add(rand, vlak);
+  const lijn = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)), new THREE.LineBasicMaterial({ color: kleur }));
+  g.add(lijn); g.renderOrder = 6;
+  g.userData = { vlak, rand };
+  return g;
+}
+const schildMeshes = [];   // { g, s: {x,z,yl,yh,b,eind,start}, van: 'ik'|'ander' }
+function plaatsSchild(s, van) {
+  const g = maakSchildMesh(van === 'ik' ? (rol === 'A' ? K.blauw : K.roze) : (rol === 'A' ? K.roze : K.blauw));
+  g.position.set(s.x, (s.yl + s.yh) / 2, s.z); g.scale.set(s.b, 0.01, 1); wereld.add(g);
+  schildMeshes.push({ g, s, van });
+}
+function zetSchild(x, z, yl, yh) {
+  if (schildenOver < 1 || mijnSchild || spel.fase !== 'spel') return false;
+  schildenOver--;
+  mijnSchild = { x, z, yl, yh, b: D.schildBreed, start: tijd, eind: tijd + D.schildDuur };
+  plaatsSchild(mijnSchild, 'ik');
+  stuurZeker({ t: 'schild', x: +x.toFixed(3), z: +z.toFixed(3), yl: +yl.toFixed(3), yh: +yh.toFixed(3), b: D.schildBreed, duur: D.schildDuur });
+  geluid.schild(); gebeurtenis('schild', { x: +x.toFixed(2), z: +z.toFixed(2), yl: +yl.toFixed(2), yh: +yh.toFixed(2) });
+  rondeTel.schilden++;
+  return true;
+}
+function ontvangSchild(d) {   // schild van de ander: zijn coördinaten 180° gedraaid tegenover mij
+  const p = spiegel([d.x, 0, d.z]);
+  plaatsSchild({ x: p.x, z: p.z, yl: d.yl, yh: d.yh, b: d.b, start: tijd, eind: tijd + d.duur }, 'ander');
+  geluid.schild();
+}
+function updateSchilden() {
+  for (let i = schildMeshes.length - 1; i >= 0; i--) {
+    const m = schildMeshes[i], s = m.s, a = tijd - s.start, rest = s.eind - tijd;
+    const groei = Math.min(1, a / 0.25);   // rits: van onder naar boven open
+    const hgt = (s.yh - s.yl) * groei;
+    m.g.scale.set(s.b, Math.max(0.01, hgt), 1); m.g.position.y = s.yl + hgt / 2;
+    const knipper = rest < 1 ? 0.5 + 0.5 * Math.sin(tijd * 30) : 1;
+    m.g.userData.vlak.material.opacity = 0.32 * knipper; m.g.userData.vlak.material.map.offset.y = tijd * 0.2;
+    if (rest <= 0) { wereld.remove(m.g); schildMeshes.splice(i, 1); }
+  }
+  if (mijnSchild && tijd >= mijnSchild.eind) mijnSchild = null;
 }
 let flitsT = -9;
 const flits = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 8), new THREE.MeshBasicMaterial({ color: 0xff2a00, transparent: true, opacity: 0, side: THREE.BackSide, depthTest: false, depthWrite: false }));
@@ -881,20 +988,135 @@ function updateVliegers(dt) {
     const w = vliegers[i]; w.t += dt;
     w.mesh.position.copy(w.van).addScaledVector(w.v, w.t);
     const st = w.mesh.userData.steen, dr = w.mesh.userData.draai; st.rotation.x += dr.x * dt; st.rotation.y += dr.y * dt;
-    vonk(w.mesh.position, 0xff7a1a, 1, 0.15, 0.4, 0, 0.05);
+    vonk(w.mesh.position, w.mesh.userData.spoor, w.turbo ? 3 : 1, 0.15, 0.4, 0, 0.05);
+    if (w.soort === 'in' && !w.klaar && mijnSchild && w.vorige.z < mijnSchild.z && w.mesh.position.z >= mijnSchild.z) {   // door mijn schild?
+      const f = (mijnSchild.z - w.vorige.z) / Math.max(1e-6, w.mesh.position.z - w.vorige.z), px = w.vorige.x + (w.mesh.position.x - w.vorige.x) * f, py = w.vorige.y + (w.mesh.position.y - w.vorige.y) * f;
+      if (Math.abs(px - mijnSchild.x) < mijnSchild.b / 2 && py > mijnSchild.yl && py < mijnSchild.yh) {
+        w.klaar = true;
+        stuurZeker({ t: 'uitslag', id: w.id, geraakt: false, geblokt: true, afstand: 0.5 });
+        worpen.push({ t: +nu().toFixed(2), ronde: spel.ronde, soort: 'ontvangen', id: w.id, turbo: w.turbo, geraakt: false, geblokt: true, uitwijk: +Math.hypot(mijnKop.x - w.kopStart.x, mijnKop.y - w.kopStart.y).toFixed(3), daal: +(base.y - mijnKop.y).toFixed(3) });
+        vonk(new THREE.Vector3(px, py, mijnSchild.z), 0x8fe3ff, 40, 1.6, 0.6); geluid.blok();
+        zetPopup('Geblokt! 🛡', '#8fe3ff', new THREE.Vector3(px, py + 0.25, mijnSchild.z - 0.2));
+        wereld.remove(w.mesh); vliegers.splice(i, 1); continue;
+      }
+    }
+    if (w.vorige) w.vorige.copy(w.mesh.position);
     if (w.soort === 'in' && w.t >= w.duur && !w.klaar) {
       w.klaar = true;
       const d = Math.hypot(w.mesh.position.x - mijnKop.x, w.mesh.position.y - mijnKop.y);
       const geraakt = d < D.raak, uitwijk = Math.hypot(mijnKop.x - w.kopStart.x, mijnKop.y - w.kopStart.y);
       stuurZeker({ t: 'uitslag', id: w.id, geraakt, afstand: +d.toFixed(3) });
-      worpen.push({ t: +nu().toFixed(2), ronde: spel.ronde, soort: 'ontvangen', id: w.id, geraakt, afstand: +d.toFixed(3), uitwijk: +uitwijk.toFixed(3), daal: +(base.y - mijnKop.y).toFixed(3) });
+      worpen.push({ t: +nu().toFixed(2), ronde: spel.ronde, soort: 'ontvangen', id: w.id, turbo: w.turbo, geraakt, afstand: +d.toFixed(3), uitwijk: +uitwijk.toFixed(3), daal: +(base.y - mijnKop.y).toFixed(3) });
       if (geraakt) { score.geraakt++; laatNaEinde(); flitsT = tijd; geluid.geraakt(); vonk(w.mesh.position, 0xff5a1f, 40, 1.8, 0.7); wereld.remove(w.mesh); vliegers.splice(i, 1); continue; }
       geluid.ontweken();
     }
     if (w.t > w.duur * 1.8) { wereld.remove(w.mesh); vliegers.splice(i, 1); }
   }
 }
-// ---------- Spelverloop: opstellen → wachten → aftellen → spel → einde ----------
+// ---------- Bewegingsherkenning: bovenhandse worp en ritsen (schild) ----------
+const histo = { left: [], right: [] };   // laatste 1,2 s handposities (lokaal)
+let laatsteGebaar = { left: -9, right: -9 }, worpVlag = [];
+function herkenGebaren() {
+  for (const k of ['left', 'right']) {
+    const h = mijnHanden[k], H = histo[k];
+    if (!h) { if (H.length && tijd - H.at(-1).t > 0.25) H.length = 0; continue; }
+    H.push({ t: tijd, p: h.clone() }); while (H.length && tijd - H[0].t > 1.2) H.shift();
+    if (H.length < 3 || tijd - laatsteGebaar[k] < D.worpPauze) continue;
+    let oud = H[0]; for (let i = H.length - 1; i >= 0; i--) if (tijd - H[i].t >= 0.06) { oud = H[i]; break; }
+    const dtv = tijd - oud.t; if (dtv < 0.03) continue;
+    const v = h.clone().sub(oud.p).divideScalar(dtv), snel = v.length();
+    // 1. bovenhandse worp: in de laatste 0,5 s hoog naast/achter je hoofd, nu snel naar voren en vóór je hoofd
+    const opgehaald = H.some(e => tijd - e.t < 0.5 && e.p.y > mijnKop.y - D.worpHoog && e.p.z > mijnKop.z - D.worpTerug);
+    if (!knijpModus && snel > D.worpSnel && -v.z > D.worpVooruit && h.z < mijnKop.z - 0.15 && opgehaald && spel.fase === 'spel') {
+      const richting = v.clone().normalize();
+      if (gooi(k, richting)) { laatsteGebaar[k] = tijd; worpVlag.push({ t: +tijd.toFixed(2), hand: k, snelheid: +snel.toFixed(2) }); H.length = 0; continue; }
+    }
+    // 2. ritsen: in de laatste 1 s laag (heup), nu snel omhoog tot boven je gezicht, vooral recht omhoog en vóór je
+    if (v.y > D.ritsSnel && h.y > mijnKop.y - D.ritsHoog && h.z < mijnKop.z - 0.1 && spel.fase === 'spel') {
+      const laag = H.reduce((m, e) => tijd - e.t < 1.0 && (!m || e.p.y < m.p.y) ? e : m, null);
+      if (laag && laag.p.y < mijnKop.y - D.ritsLaag && Math.hypot(h.x - laag.p.x, h.z - laag.p.z) < D.ritsOpzij) {
+        const pad = H.filter(e => e.t >= laag.t), mx = pad.reduce((a, e) => a + e.p.x, 0) / pad.length, mz = pad.reduce((a, e) => a + e.p.z, 0) / pad.length;
+        const z = THREE.MathUtils.clamp(mz, mijnKop.z - 0.75, mijnKop.z - 0.3);
+        if (zetSchild(mx, z, Math.max(0.3, laag.p.y - 0.1), Math.max(h.y, mijnKop.y) + 0.25)) { laatsteGebaar[k] = tijd; H.length = 0; }
+      }
+    }
+  }
+}
+// ---------- Pylonen: kalibreren door ze aan te tikken, oplichten, omduwen = turbo ----------
+let pylonModus = true, knijpModus = false, pylonen = [], pylonAan = null, pylonVolgende = 0, kal = null;
+const pylonMat = new THREE.MeshBasicMaterial({ color: 0xff8a1a, transparent: true, opacity: 0.25, depthWrite: false });
+function maakPylon(x, z, top) {
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  const hgt = THREE.MathUtils.clamp(top, 0.25, 0.9);
+  const kegel = new THREE.Mesh(new THREE.ConeGeometry(0.13, hgt, 20, 1, true), pylonMat.clone()); kegel.position.y = hgt / 2; g.add(kegel);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.17, 0.21, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff8a1a, transparent: true, opacity: 0.5, depthWrite: false })); ring.position.y = 0.01; g.add(ring);
+  const straal = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.16, 2.2, 20, 1, true), new THREE.MeshBasicMaterial({ color: K.geel, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  straal.position.y = 1.1; g.add(straal);
+  const klok = new THREE.Mesh(new THREE.RingGeometry(0.23, 0.27, 40, 1, 0, Math.PI * 2).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: K.geel, transparent: true, opacity: 0, depthWrite: false })); klok.position.y = 0.012; g.add(klok);
+  g.userData = { kegel, ring, straal, klok, top: hgt, x, z, val: 0 };
+  wereld.add(g); return g;
+}
+const PYLON_NAMEN = ['linker', 'middelste', 'rechter'];
+function startKalibratie() {
+  kal = { i: 0, t: 0, stilT: 0, ref: null }; spel.fase = 'pylonen';
+  for (const p of pylonen) wereld.remove(p); pylonen = [];
+  gebeurtenis('pylonen-start');
+}
+function updateKalibratie(dt) {
+  kal.t += dt;
+  zetMidden(`Tik de ${PYLON_NAMEN[kal.i]} pylon aan (hand op de top)`, '#ff8a1a');
+  let kandidaat = null;
+  for (const k of ['left', 'right']) { const h = mijnHanden[k]; if (h && h.y < 0.95 && h.z < mijnKop.z - 0.35 && pylonen.every(p => Math.hypot(p.userData.x - h.x, p.userData.z - h.z) > 0.45)) kandidaat = h; }
+  if (kandidaat) {
+    if (kal.ref && kandidaat.distanceTo(kal.ref) < 0.05) kal.stilT += dt; else { kal.stilT = 0; kal.ref = kandidaat.clone(); }
+  } else kal.stilT = 0;
+  const klaar = kal.stilT > 0.5, opgegeven = kal.t > 25;
+  if (klaar || opgegeven) {
+    const x = klaar ? kal.ref.x : [-1, 0, 1][kal.i], z = klaar ? kal.ref.z : mijnKop.z - 1, top = klaar ? kal.ref.y - 0.03 : 0.5;
+    pylonen.push(maakPylon(x, z, top)); geluid.pylon();
+    gebeurtenis('pylon', { nr: kal.i + 1, x: +x.toFixed(2), z: +z.toFixed(2), top: +top.toFixed(2), standaard: !klaar });
+    kal.i++; kal.t = 0; kal.stilT = 0; kal.ref = null;
+    if (kal.i >= 3) { kal = null; zetMidden(null); meldKlaar(); }
+  }
+}
+function updatePylonen(dt) {
+  for (const p of pylonen) {
+    const u = p.userData, aan = pylonAan && pylonAan.p === p;
+    u.val = Math.max(0, u.val - dt * 0.5);
+    u.kegel.material.opacity = aan ? 0.55 + 0.3 * Math.sin(tijd * 10) : 0.18;
+    u.kegel.material.color.setHex(aan ? K.geel : 0xff8a1a);
+    u.straal.material.opacity = aan ? 0.25 + 0.15 * Math.sin(tijd * 6) : 0;
+    u.klok.material.opacity = aan ? 0.9 : 0;
+    if (aan) { const rest = 1 - (tijd - pylonAan.start) / D.pylonAan; u.klok.geometry.dispose(); u.klok.geometry = new THREE.RingGeometry(0.23, 0.27, 40, 1, 0, Math.PI * 2 * Math.max(0.01, rest)).rotateX(-Math.PI / 2); }
+    u.kegel.rotation.z = u.val > 0 ? Math.min(1, (1 - u.val) * 5) * 1.45 : 0;   // virtuele pylon valt om en staat na 2 s weer
+  }
+  if (spel.fase !== 'spel' || !pylonen.length) return;
+  if (pylonAan) {
+    const p = pylonAan.p, u = p.userData;
+    for (const k of ['left', 'right']) {
+      const h = mijnHanden[k];
+      if (h && Math.hypot(h.x - u.x, h.z - u.z) < D.pylonBereik && h.y < u.top + 0.2) {
+        turbo = true; u.val = 1; rondeTel.pylonen++;
+        geluid.turbo(); vonk(new THREE.Vector3(u.x, u.top, u.z), K.blauw, 50, 1.8, 0.8, 1);
+        zetPopup('⚡ TURBO!', '#43BFFD', new THREE.Vector3(u.x, u.top + 0.5, u.z));
+        gebeurtenis('pylon-gepakt', { na: +(tijd - pylonAan.start).toFixed(2) });
+        stuurZeker({ t: 'turbo' });
+        pylonAan = null; pylonVolgende = spel.klok + D.pylonTussen[0] + Math.random() * (D.pylonTussen[1] - D.pylonTussen[0]); return;
+      }
+    }
+    if (tijd - pylonAan.start > D.pylonAan) { gebeurtenis('pylon-gemist'); rondeTel.pylonenGemist++; pylonAan = null; pylonVolgende = spel.klok + D.pylonTussen[0] + Math.random() * (D.pylonTussen[1] - D.pylonTussen[0]); }
+  } else if (!turbo && spel.klok > pylonVolgende && spel.klok < D.rondeTijd - D.pylonAan) {
+    const keuze = pylonen.filter(p => p !== laatstePylon); const p = keuze[Math.floor(Math.random() * keuze.length)];
+    pylonAan = { p, start: tijd }; laatstePylon = p; geluid.pylon(); gebeurtenis('pylon-aan', { nr: pylonen.indexOf(p) + 1 });
+  }
+}
+let laatstePylon = null;
+// label boven de tegenstander als hij een turboblok klaar heeft
+const turboLabel = tekenVlak(512, 128, 0.36, 0.09, 12); turboLabel.visible = false; wereld.add(turboLabel);
+{ const c = turboLabel.userData.ctx; c.fillStyle = 'rgba(20,40,80,0.85)'; c.beginPath(); c.roundRect(8, 8, 496, 112, 50); c.fill(); c.fillStyle = '#8fe3ff'; c.font = 'bold 64px system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('⚡ TURBO', 256, 68); turboLabel.userData.tex.needsUpdate = true; }
+let anderTurbo = false;
+let rondeTel = { schilden: 0, pylonen: 0, pylonenGemist: 0 };
+// ---------- Spelverloop: opstellen → (pylonen) → wachten → aftellen → spel → einde ----------
 const spel = { fase: 'uit', ronde: 0, klok: 0, ikKlaar: false, anderKlaar: -1, startOver: 0, ontvang: null };
 function meldKlaar() { spel.ikKlaar = true; stuurZeker({ t: 'klaar', ronde: spel.ronde }); zetMidden('Wacht op je tegenstander…', '#F6F01D'); spel.fase = 'wachten'; gebeurtenis('klaar', { ronde: spel.ronde }); }
 function probeerStart() {   // speler A beslist wanneer de ronde begint
@@ -902,6 +1124,9 @@ function probeerStart() {   // speler A beslist wanneer de ronde begint
 }
 function begin() {
   spel.fase = 'aftellen'; spel.klok = -D.aftellen; score.raak = score.geraakt = 0; blokken = D.maxBlokken;
+  schildenOver = D.schilden; mijnSchild = null; turbo = false; anderTurbo = false; pylonAan = null; pylonVolgende = D.pylonEerste;
+  rondeTel = { schilden: 0, pylonen: 0, pylonenGemist: 0 };
+  for (const m of schildMeshes) wereld.remove(m.g); schildMeshes.length = 0;
   gebeurtenis('aftellen', { ronde: spel.ronde });
 }
 spel.ontvang = d => {
@@ -910,6 +1135,8 @@ spel.ontvang = d => {
   else if (d.t === 'worp') ontvangWorp(d);
   else if (d.t === 'uitslag') ontvangUitslag(d);
   else if (d.t === 'stop') { zetMidden('De ander is gestopt', '#ff6b6b'); }
+  else if (d.t === 'schild') ontvangSchild(d);
+  else if (d.t === 'turbo') anderTurbo = true;
 };
 function laatNaEinde() {   // uitslag die net na het eindsignaal binnenkomt: rondeuitslag en menu bijwerken
   if (spel.fase !== 'einde' || !rondes.length) return;
@@ -919,7 +1146,10 @@ function laatNaEinde() {   // uitslag die net na het eindsignaal binnenkomt: ron
 }
 function eindeRonde(p, q) {
   spel.fase = 'einde';
-  const r = { ronde: spel.ronde + 1, raak: score.raak, geraakt: score.geraakt, gegooid: worpen.filter(w => w.ronde === spel.ronde && w.soort === 'gegooid').length, ontvangen: worpen.filter(w => w.ronde === spel.ronde && w.soort === 'ontvangen').length };
+  const wr = worpen.filter(w => w.ronde === spel.ronde);
+  const r = { ronde: spel.ronde + 1, raak: score.raak, geraakt: score.geraakt, gegooid: wr.filter(w => w.soort === 'gegooid').length, ontvangen: wr.filter(w => w.soort === 'ontvangen').length,
+    geblokt: wr.filter(w => w.soort === 'ontvangen' && w.geblokt).length, turboGegooid: wr.filter(w => w.soort === 'gegooid' && w.turbo).length, turboRaak: wr.filter(w => w.soort === 'gegooid' && w.turbo && w.geraakt).length, ...rondeTel };
+  pylonAan = null;
   rondes.push(r); gebeurtenis('einde-ronde', r);
   const gelijk = score.raak === score.geraakt, win = score.raak > score.geraakt;
   zetMidden(gelijk ? 'Gelijkspel!' : win ? 'Jij wint! 🏆' : 'Je tegenstander wint', gelijk ? '#ffffff' : win ? '#5ee08a' : '#EB69BB');
@@ -946,7 +1176,7 @@ function update(p, q, handW, dt, frame, ref) {
   if (!base) {
     zetMidden('Sta stil en kijk recht vooruit');
     if (ankerP && hp.distanceTo(ankerP) < 0.015) stilT += dt; else { stilT = 0; ankerP = hp.clone(); }
-    if (stilT > 1) { zetBase(p, q); meldKlaar(); } else return;
+    if (stilT > 1) { zetBase(p, q); if (pylonModus && !pylonen.length) startKalibratie(); else meldKlaar(); } else return;
   }
   wereld.updateMatrixWorld();
   mijnKop = wereld.worldToLocal(hp.clone());
@@ -958,9 +1188,10 @@ function update(p, q, handW, dt, frame, ref) {
     const r3 = v => v ? v.toArray().map(x => +x.toFixed(3)) : null;
     stuur({ t: 'pose', n: ++poseN, k: r3(mijnKop), q: mijnKopQ.toArray().map(x => +x.toFixed(3)), l: r3(mijnHanden.left), r: r3(mijnHanden.right) });
   }
-  if (frames.length < 30000 && (!frames.length || tijd - frames[frames.length - 1][0] >= 0.033)) frames.push([+tijd.toFixed(3), +mijnKop.x.toFixed(3), +mijnKop.y.toFixed(3), +mijnKop.z.toFixed(3), spel.fase, avatar.visible ? 1 : 0]);
+  if (frames.length < 30000 && (!frames.length || tijd - frames[frames.length - 1][0] >= 0.033)) { const r3 = v => v ? [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)] : ['', '', '']; frames.push([+tijd.toFixed(3), +mijnKop.x.toFixed(3), +mijnKop.y.toFixed(3), +mijnKop.z.toFixed(3), spel.fase, avatar.visible ? 1 : 0, ...r3(mijnHanden.left), ...r3(mijnHanden.right)]); }
   // spelverloop
-  if (spel.fase === 'wachten') { probeerStart(); if (!verbonden) zetMidden('Geen verbinding…', '#ff6b6b'); }
+  if (spel.fase === 'pylonen') updateKalibratie(dt);
+  else if (spel.fase === 'wachten') { probeerStart(); if (!verbonden) zetMidden('Geen verbinding…', '#ff6b6b'); }
   else if (spel.fase === 'aftellen') {
     spel.klok += dt;
     zetMidden(spel.klok < 0 ? String(Math.ceil(-spel.klok)) : 'Gooi!', spel.klok < 0 ? '#F6F01D' : '#5ee08a');
@@ -968,13 +1199,15 @@ function update(p, q, handW, dt, frame, ref) {
   } else if (spel.fase === 'spel') {
     spel.klok += dt;
     blokken = Math.min(D.maxBlokken, blokken + dt / D.laadTijd);
+    herkenGebaren();
     if (spel.klok >= D.rondeTijd) eindeRonde(p, q);
   } else if (spel.fase === 'einde') {
     const id = updateMenu(handW, frame, ref, dt);
     if (id === 'opnieuw') { menu.visible = false; spel.ronde++; for (const w of vliegers) wereld.remove(w.mesh); vliegers.length = 0; meldKlaar(); }
     else if (id === 'stop') { stuurZeker({ t: 'stop' }); menu.visible = false; if (sessie) sessie.end(); }
   }
-  updateAvatar(dt); updateVliegers(dt); updateVonken(dt); updateUitloop(dt);
+  updateAvatar(dt); updateVliegers(dt); updateVonken(dt); updateUitloop(dt); updateSchilden(); updatePylonen(dt);
+  turboLabel.visible = anderTurbo && avatar.visible; if (turboLabel.visible) { turboLabel.position.copy(anderNu.kop).add(new THREE.Vector3(0, 0.38, 0)); turboLabel.lookAt(hp); }
   ruimte.userData.station.rotation.z += dt * 0.05;
   poort.userData.gloed.material.opacity = 0.75 + Math.sin(tijd * 2) * 0.25;
   if (popup.visible) { const a = tijd - popupT; popup.position.y = popup.userData.y0 + a * 0.12; popup.material.opacity = Math.max(0, 1 - Math.max(0, a - 0.7) / 0.5); popup.lookAt(hp); if (a > 1.2) popup.visible = false; }
@@ -1005,12 +1238,14 @@ function voorbeeld(t) {
     scene.background = new THREE.Color(0x8a8f96); camera.aspect = innerWidth / innerHeight; camera.fov = 75; camera.updateProjectionMatrix();
     camera.position.set(0, 1.67, 0);
     if (VB.has('derde')) { camera.position.set(2.2, 2.1, 1.4); camera.lookAt(0, 1.2, -2.5); }
-    transport = 'bot'; verbindBot();
+    transport = 'bot'; pylonModus = !VB.has('geenpylonen'); verbindBot();
+    if (pylonModus) { zetBase({ x: 0, y: 1.67, z: 0 }, new THREE.Quaternion()); [-1, 0, 1].forEach(x => pylonen.push(maakPylon(x, -1, 0.5))); meldKlaar(); }
   }
   const q0 = new THREE.Quaternion(), s = tijd;
   const kop = new THREE.Vector3(Math.sin(s * 0.8) * 0.05, 1.67, 0);
   update(kop, q0, { right: new THREE.Vector3(0.25, 1.2, -0.35), left: new THREE.Vector3(-0.25, 1.1, -0.25) }, dt, null, null);
-  if (spel.fase === 'spel' && VB.has('gooi') && Math.floor(s / 1.7) !== Math.floor((s - dt) / 1.7)) gooi('right');
+  if (spel.fase === 'spel' && VB.has('gooi') && Math.floor(s / 1.7) !== Math.floor((s - dt) / 1.7)) gooi('right', new THREE.Vector3(0, 0, -1));
+  if (spel.fase === 'spel' && VB.has('schild') && !mijnSchild && schildenOver > 0) zetSchild(0.1, -0.45, 0.6, 1.9);
   renderer.render(scene, camera);
 }
 // ---------- Pagina ----------
@@ -1023,7 +1258,8 @@ $('verbind').onclick = () => {
   const keuze = VB.get('transport') || $('transport').value;
   if (code.length < 3 && keuze !== 'bot') { setStatus('Kies een code van minstens 3 tekens', '#ff6b6b'); return; }
   for (const id of ['verbind', 'code', 'nieuweCode', 'transport', 'afstand']) $(id).disabled = true;
-  AFSTAND = +$('afstand').value;
+  AFSTAND = +$('afstand').value; pylonModus = $('optPylonen').checked; knijpModus = $('optKnijp').checked;
+  $('optPylonen').disabled = $('optKnijp').disabled = true;
   t0 = performance.now(); gebeurtenis('start', { code, transport: keuze, afstand: AFSTAND });
   transport = keuze.split(':')[0];
   if (keuze === 'lokaal') verbindLokaal(code);
@@ -1036,13 +1272,13 @@ function toonResultaten() {
   const el = $('resultaten');
   if (!rondes.length) { el.innerHTML = ''; return; }
   const kw = worpen.filter(w => w.soort === 'ontvangen');
-  el.innerHTML = `<p><b>Rondes</b></p><table><tr><th>Ronde</th><th>Jij raak</th><th>Jij geraakt</th><th>Gegooid</th><th>Ontvangen</th></tr>` +
-    rondes.map(r => `<tr><td>${r.ronde}</td><td class="ok">${r.raak}</td><td class="nee">${r.geraakt}</td><td>${r.gegooid}</td><td>${r.ontvangen}</td></tr>`).join('') + '</table>' +
+  el.innerHTML = `<p><b>Rondes</b></p><table><tr><th>Ronde</th><th>Jij raak</th><th>Jij geraakt</th><th>Gegooid</th><th>Ontvangen</th><th>Geblokt</th><th>Turbo (raak)</th><th>Pylonen</th></tr>` +
+    rondes.map(r => `<tr><td>${r.ronde}</td><td class="ok">${r.raak}</td><td class="nee">${r.geraakt}</td><td>${r.gegooid}</td><td>${r.ontvangen}</td><td>${r.geblokt} (${r.schilden} schild)</td><td>${r.turboGegooid} (${r.turboRaak})</td><td>${r.pylonen} gepakt · ${r.pylonenGemist} gemist</td></tr>`).join('') + '</table>' +
     (kw.length ? `<p>Ontweken: ${kw.filter(w => !w.geraakt).length} van ${kw.length} · gemiddeld ${Math.round(100 * kw.reduce((a, w) => a + w.uitwijk, 0) / kw.length)} cm uitgeweken</p>` : '');
 }
 $('download').onclick = () => {
   const d = new Date(), z = x => String(x).padStart(2, '0');
-  const data = { app: 'iXbattle Duel', versie: VERSIE, datum: d.toISOString(), rol, verbinding: verbType, afstand: AFSTAND, instellingen: D, ua: navigator.userAgent, rondes, worpen, kolommen: ['t', 'kopX', 'kopY', 'kopZ', 'fase', 'tegenstanderZichtbaar'], frames, base: base && { y: +base.y.toFixed(3) }, netwerk: net };
+  const data = { app: 'iXbattle Duel', versie: VERSIE, datum: d.toISOString(), rol, verbinding: verbType, afstand: AFSTAND, instellingen: D, ua: navigator.userAgent, rondes, worpen, kolommen: ['t', 'kopX', 'kopY', 'kopZ', 'fase', 'tegenstanderZichtbaar', 'linksX', 'linksY', 'linksZ', 'rechtsX', 'rechtsY', 'rechtsZ'], pylonen: pylonen.map(p => ({ x: +p.userData.x.toFixed(3), z: +p.userData.z.toFixed(3), top: +p.userData.top.toFixed(3) })), worpHerkend: worpVlag, frames, base: base && { y: +base.y.toFixed(3) }, netwerk: net };
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   a.download = `ixbattle-duel-${rol || 'x'}-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}.json`;
   document.body.appendChild(a); a.click(); a.remove();
@@ -1053,7 +1289,7 @@ $('startMR').onclick = async () => {
   try {
     if (!audio) audio = new AudioContext();
     sessie = await navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
-    sessie.addEventListener('select', e => { selectBronnen.push(e.inputSource); if (spel.fase === 'spel') gooi(e.inputSource.handedness); });
+    sessie.addEventListener('select', e => { selectBronnen.push(e.inputSource); if (spel.fase === 'spel' && knijpModus) gooi(e.inputSource.handedness); });
     sessie.addEventListener('end', () => {
       vorigeT = null; base = null; wereld.visible = false; zetMidden(null); menu.visible = false; for (const k in handVis) handVis[k].g.visible = false;
       spel.fase = 'uit'; gebeurtenis('mr-einde'); sessie = null; toonResultaten(); toonStats(); $('startMR').textContent = 'Opnieuw starten';
@@ -1063,7 +1299,7 @@ $('startMR').onclick = async () => {
   } catch (e) { setStatus('MR starten mislukt: ' + e.message, '#ff6b6b'); }
 };
 // testhaak (simulaties zonder headset)
-window.duel = { get rol() { return rol; }, get verbonden() { return verbonden; }, net, spel, score, get worpen() { return worpen; }, get rondes() { return rondes; }, _update: update, gooi, get avatar() { return avatar; }, anderNu, get vliegers() { return vliegers; }, THREE, kies: id => { menuKeuze = id; }, D, toonResultaten, get blokken() { return blokken; } };
+window.duel = { get rol() { return rol; }, get verbonden() { return verbonden; }, net, spel, score, get worpen() { return worpen; }, get rondes() { return rondes; }, _update: update, gooi, get avatar() { return avatar; }, anderNu, get vliegers() { return vliegers; }, THREE, kies: id => { menuKeuze = id; }, D, toonResultaten, get blokken() { return blokken; }, get turbo() { return turbo; }, get pylonAan() { return pylonAan; }, get pylonen() { return pylonen; }, get schildenOver() { return schildenOver; }, get mijnSchild() { return mijnSchild; }, get schildMeshes() { return schildMeshes; }, get worpVlag() { return worpVlag; }, _ontvang: d => ontvang(d), zetModi: (pyl, kn) => { pylonModus = pyl; knijpModus = kn; } };
 </script>
 </body>
 </html>
